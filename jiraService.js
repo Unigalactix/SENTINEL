@@ -1,0 +1,139 @@
+const https = require('https');
+require('dotenv').config();
+
+const JIRA_BASE_URL = process.env.JIRA_BASE_URL;
+const JIRA_EMAIL = process.env.JIRA_USER_EMAIL;
+const JIRA_TOKEN = process.env.JIRA_API_TOKEN;
+const JIRA_PROJECT_KEYS = process.env.JIRA_PROJECT_KEY || 'NDE';
+
+const authHeader = 'Basic ' + Buffer.from(`${JIRA_EMAIL}:${JIRA_TOKEN}`).toString('base64');
+
+/**
+ * Helper to make Jira API requests
+ */
+async function jiraRequest(path, method = 'GET', body = null) {
+    return new Promise((resolve, reject) => {
+        const url = new URL(`${JIRA_BASE_URL}${path}`);
+
+        const options = {
+            hostname: url.hostname,
+            port: 443,
+            path: url.pathname + url.search,
+            method: method,
+            headers: {
+                'Authorization': authHeader,
+                'Accept': 'application/json',
+                'Content-Type': 'application/json'
+            }
+        };
+
+        const req = https.request(options, (res) => {
+            let data = '';
+            res.on('data', (chunk) => data += chunk);
+            res.on('end', () => {
+                if (res.statusCode >= 200 && res.statusCode < 300) {
+                    try {
+                        resolve(data ? JSON.parse(data) : {});
+                    } catch (e) {
+                        reject(new Error(`Failed to parse Jira response: ${e.message}`));
+                    }
+                } else {
+                    reject(new Error(`Jira API Error: ${res.statusCode} ${data}`));
+                }
+            });
+        });
+
+        req.on('error', (e) => reject(e));
+
+        if (body) {
+            req.write(JSON.stringify(body));
+        }
+        req.end();
+    });
+}
+
+/**
+ * Fetch pending tickets (Status = 'To Do')
+ * Uses standard POST search API to avoid deprecation/URL limit issues.
+ */
+async function getPendingTickets() {
+    // JQL: Broad scope for any 'New'/'To Do' items
+    const jql = `project IN (${JIRA_PROJECT_KEYS}) AND statusCategory = "To Do" ORDER BY priority DESC`;
+
+    try {
+        const result = await jiraRequest('/rest/api/3/search/jql', 'POST', {
+            jql: jql,
+            fields: [
+                'summary',
+                'description',
+                'priority',
+                'customfield_repo',
+                'customfield_language',
+                'customfield_build',
+                'customfield_test',
+                'customfield_deploy'
+            ],
+            maxResults: 50
+        });
+        return result.issues || [];
+    } catch (error) {
+        console.error('Error fetching Jira tickets:', error.message);
+        return [];
+    }
+}
+
+/**
+ * Transition ticket status
+ */
+async function transitionIssue(issueKey, targetStatusName) {
+    try {
+        const transitionsData = await jiraRequest(`/rest/api/3/issue/${issueKey}/transitions`);
+        const transitions = transitionsData.transitions || [];
+
+        const transition = transitions.find(t => t.name.toLowerCase() === targetStatusName.toLowerCase());
+
+        if (!transition) {
+            console.warn(`Transition "${targetStatusName}" not found for issue ${issueKey}.`);
+            return;
+        }
+
+        await jiraRequest(`/rest/api/3/issue/${issueKey}/transitions`, 'POST', {
+            transition: { id: transition.id }
+        });
+        console.log(`Transitioned ${issueKey} to "${targetStatusName}"`);
+    } catch (error) {
+        console.error(`Error transitioning ${issueKey}:`, error.message);
+    }
+}
+
+/**
+ * Add a comment to the issue
+ */
+async function addComment(issueKey, body) {
+    try {
+        const adfBody = {
+            "version": 1,
+            "type": "doc",
+            "content": [
+                {
+                    "type": "paragraph",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": body
+                        }
+                    ]
+                }
+            ]
+        };
+
+        await jiraRequest(`/rest/api/3/issue/${issueKey}/comment`, 'POST', {
+            body: adfBody
+        });
+        console.log(`Added comment to ${issueKey}`);
+    } catch (error) {
+        console.error(`Error commenting on ${issueKey}:`, error.message);
+    }
+}
+
+module.exports = { getPendingTickets, transitionIssue, addComment };

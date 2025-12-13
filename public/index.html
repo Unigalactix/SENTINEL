@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jira Autopilot Command Center</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #F4F5F7;
+            --column-bg: #EBECF0;
+            --card-bg: #FFFFFF;
+            --text-main: #172B4D;
+            --text-sub: #5E6C84;
+            --primary: #0052CC;
+            --success: #36B37E;
+            --danger: #FF5630;
+            --warn: #FFAB00;
+        }
+
+        body {
+            font-family: 'Outfit', sans-serif;
+            background-color: var(--bg);
+            color: var(--text-main);
+            margin: 0;
+            padding: 2rem;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* --- Layout --- */
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            gap: 2rem;
+            flex: 1;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .board-title {
+            font-size: 1.8rem;
+            font-weight: 700;
+            color: var(--text-main);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .timer-badge {
+            background: white;
+            color: var(--text-main);
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-weight: 600;
+            font-size: 0.9rem;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+        }
+
+        /* --- Hero Section (Live Agent) --- */
+        .hero-section {
+            background: white;
+            border-radius: 16px;
+            padding: 2rem;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+            display: flex;
+            gap: 2rem;
+            min-height: 250px;
+            transition: all 0.3s ease;
+        }
+
+        .hero-section.idle {
+            opacity: 0.6;
+            filter: grayscale(100%);
+        }
+
+        .hero-info {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+
+        .hero-status-label {
+            text-transform: uppercase;
+            font-size: 0.85rem;
+            font-weight: 700;
+            color: var(--text-sub);
+            margin-bottom: 0.5rem;
+        }
+
+        .hero-ticket-key {
+            font-size: 3rem;
+            font-weight: 700;
+            color: var(--primary);
+            margin-bottom: 1rem;
+            line-height: 1;
+        }
+
+        .hero-actions {
+            display: flex;
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+
+        .btn {
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-weight: 600;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            transition: transform 0.1s, opacity 0.2s;
+            border: none;
+            cursor: pointer;
+            font-size: 0.9rem;
+        }
+
+        /* Small button for cards */
+        .btn-small {
+            padding: 4px 12px;
+            border-radius: 6px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+        }
+
+        .btn:active {
+            transform: translateY(0);
+        }
+
+        .btn[disabled] {
+            opacity: 0.5;
+            pointer-events: none;
+        }
+
+        .btn-jira {
+            background-color: #0052CC;
+            color: white;
+        }
+
+        .btn-github {
+            background-color: #24292e;
+            color: white;
+        }
+
+        /* --- Log Terminal --- */
+        .hero-logs {
+            flex: 1.5;
+            background: #172B4D;
+            border-radius: 12px;
+            padding: 1.5rem;
+            color: #79F2C0;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 0.9rem;
+            overflow-y: auto;
+            max-height: 250px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.3);
+        }
+
+        .log-entry {
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            padding-bottom: 4px;
+        }
+
+        .log-entry:last-child {
+            border-bottom: none;
+        }
+
+
+        /* --- Kanban Board --- */
+        .kanban-board {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 1.5rem;
+            flex: 1;
+            align-items: start;
+        }
+
+        .column {
+            background: var(--column-bg);
+            border-radius: 12px;
+            padding: 1rem;
+            min-height: 400px;
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        .column-header {
+            font-size: 0.95rem;
+            font-weight: 700;
+            color: var(--text-sub);
+            text-transform: uppercase;
+            padding: 0 4px;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .count-badge {
+            background: rgba(9, 30, 66, 0.08);
+            border-radius: 12px;
+            padding: 2px 8px;
+            color: var(--text-main);
+            font-size: 0.85rem;
+        }
+
+        .kanban-card {
+            background: var(--card-bg);
+            border-radius: 8px;
+            padding: 1rem;
+            box-shadow: 0 1px 2px rgba(9, 30, 66, 0.25);
+            border-left: 4px solid transparent;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .kanban-card.status-High,
+        .kanban-card.status-Highest {
+            border-left-color: var(--danger);
+        }
+
+        .kanban-card.status-Medium {
+            border-left-color: var(--warn);
+        }
+
+        .kanban-card.status-Low,
+        .kanban-card.status-Lowest {
+            border-left-color: var(--success);
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .card-key {
+            font-weight: 700;
+            color: var(--text-main);
+        }
+
+        .card-priority {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            color: var(--text-sub);
+            font-weight: 600;
+        }
+
+        .result-pill {
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            display: inline-block;
+        }
+
+        .result-Success {
+            background: #E3FCEF;
+            color: #006644;
+        }
+
+        .result-Failed {
+            background: #FFEBE6;
+            color: #DE350B;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 2rem 0;
+            color: var(--text-sub);
+            opacity: 0.7;
+            font-size: 0.9rem;
+        }
+
+        .timer-val {
+            font-weight: 700;
+            color: var(--primary);
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="container">
+        <header>
+            <div class="board-title">
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
+                </svg>
+                Jira Autopilot Command Center
+            </div>
+            <div class="timer-badge">
+                <span id="phaselabel">Waiting</span>
+                <span id="countdown" class="timer-val">--</span>
+            </div>
+        </header>
+
+        <!-- Hero Section -->
+        <div class="hero-section" id="heroSection">
+            <div class="hero-info">
+                <div class="hero-status-label" id="currentStatusLabel">System Idle</div>
+                <div class="hero-ticket-key" id="currentTicketKey">--</div>
+
+                <div class="hero-actions">
+                    <a href="#" target="_blank" class="btn btn-jira" id="btnJira" disabled>
+                        <img src="https://cdn.iconscout.com/icon/free/png-256/jira-1-226079.png" height="18"
+                            style="filter: brightness(0) invert(1);">
+                        Open Ticket
+                    </a>
+                    <a href="#" target="_blank" class="btn btn-github" id="btnGithub" disabled>
+                        <img src="https://cdn-icons-png.flaticon.com/512/25/25231.png" height="18"
+                            style="filter: brightness(0) invert(1);">
+                        View Pull Request
+                    </a>
+                </div>
+            </div>
+            <div class="hero-logs" id="logTerminal">
+                <div class="log-entry">> System ready. Waiting for tasks...</div>
+            </div>
+        </div>
+
+        <!-- Kanban Board -->
+        <div class="kanban-board">
+            <!-- TO DO -->
+            <div class="column">
+                <div class="column-header">Queue <span class="count-badge" id="count-todo">0</span></div>
+                <div id="col-todo"></div>
+            </div>
+            <!-- IN PROGRESS -->
+            <div class="column">
+                <div class="column-header">Processing <span class="count-badge" id="count-progress">0</span></div>
+                <div id="col-progress"></div>
+            </div>
+            <!-- DONE -->
+            <div class="column">
+                <div class="column-header">Done <span class="count-badge" id="count-done">0</span></div>
+                <div id="col-done"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function createCard(item, type) {
+            const priorityClass = `status-${item.priority.split(' ')[0]}`;
+
+            // Status Pill or Text
+            const statusHtml = type === 'done'
+                ? `<span class="result-pill result-${item.result}">${item.result}</span>`
+                : `<span style="font-size:0.85rem; color:#5E6C84">${item.status}</span>`;
+
+            // Action Buttons for DONE items
+            let actionsHtml = '';
+            if (item.jiraUrl || item.prUrl) {
+                actionsHtml = `<div style="display:flex; gap:8px; margin-top:4px;">`;
+                if (item.jiraUrl) {
+                    actionsHtml += `<a href="${item.jiraUrl}" target="_blank" class="btn btn-small btn-jira" style="text-decoration:none;">Jira</a>`;
+                }
+                if (item.prUrl) {
+                    actionsHtml += `<a href="${item.prUrl}" target="_blank" class="btn btn-small btn-github" style="text-decoration:none;">PR</a>`;
+                }
+                actionsHtml += `</div>`;
+            }
+
+            // Detailed Checks List
+            let checksHtml = '';
+            if (item.checks && item.checks.length > 0) {
+                checksHtml = '<div style="margin-top:8px; padding-top:4px; border-top:1px solid #eee; display:flex; flex-direction:column; gap:2px;">';
+                item.checks.forEach(c => {
+                    let color = '#42526E';
+                    let statusText = c.conclusion || c.status;
+                    let icon = '⚫';
+
+                    if (c.conclusion === 'success') { color = '#006644'; icon = '✅'; }
+                    else if (c.conclusion === 'failure') { color = '#DE350B'; icon = '❌'; }
+                    else if (c.conclusion === 'cancelled') { color = '#FF991F'; icon = '⚠️'; }
+                    else if (c.status === 'in_progress') { color = '#0052CC'; icon = '⏳'; }
+
+                    // Cleanup name if it's too long or repetitive? 
+                    // GitHub often sends "Workflow / Job (event)"
+                    // For now, raw name is safest as requested.
+
+                    checksHtml += `
+                    <div style="font-size:0.75rem; color:${color}; display:flex; align-items:center; justify-content:space-between;">
+                        <span style="display:flex; align-items:center; gap:4px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; max-width:70%;">
+                            <span>${icon}</span> ${c.name}
+                        </span>
+                        <span style="font-weight:600; font-size:0.7rem;">${statusText}</span>
+                    </div>`;
+                });
+                checksHtml += '</div>';
+            }
+
+
+            return `
+            <div class="kanban-card ${priorityClass}">
+                <div class="card-header">
+                    <span class="card-key">${item.key}</span>
+                    <span class="card-priority">${item.priority}</span>
+                </div>
+                ${statusHtml}
+                ${actionsHtml}
+                ${checksHtml}
+            </div>`;
+        }
+
+        async function fetchStatus() {
+            try {
+                const res = await fetch('/api/status');
+                const data = await res.json();
+
+                // 1. Update Timer & Phase
+                document.getElementById('phaselabel').innerText = data.currentPhase;
+                if (data.nextScanTime && data.currentPhase === 'Waiting') {
+                    const diff = Math.ceil((data.nextScanTime - Date.now()) / 1000);
+                    document.getElementById('countdown').innerText = (diff > 0 ? diff : 0) + 's';
+                } else {
+                    document.getElementById('countdown').innerText = '...';
+                }
+
+                // 2. Update Hero Section
+                const hero = document.getElementById('heroSection');
+                const logTerm = document.getElementById('logTerminal');
+                const btnJira = document.getElementById('btnJira');
+                const btnGithub = document.getElementById('btnGithub');
+
+                if (data.currentTicketKey) {
+                    hero.classList.remove('idle');
+                    document.getElementById('currentStatusLabel').innerText = 'Currently Processing';
+                    document.getElementById('currentTicketKey').innerText = data.currentTicketKey;
+
+                    // Buttons
+                    if (data.currentJiraUrl) {
+                        btnJira.href = data.currentJiraUrl;
+                        btnJira.removeAttribute('disabled');
+                    }
+                    if (data.currentPrUrl) {
+                        btnGithub.href = data.currentPrUrl;
+                        btnGithub.removeAttribute('disabled');
+                    } else {
+                        btnGithub.setAttribute('disabled', 'true');
+                    }
+
+                    // Logs
+                    logTerm.innerHTML = data.currentTicketLogs.map(l => `<div class="log-entry">${l}</div>`).join('');
+                    logTerm.scrollTop = logTerm.scrollHeight;
+
+                } else {
+                    hero.classList.add('idle');
+                    document.getElementById('currentStatusLabel').innerText = 'System Idle';
+                    document.getElementById('currentTicketKey').innerText = 'Waiting...';
+                    btnJira.setAttribute('disabled', 'true');
+                    btnGithub.setAttribute('disabled', 'true');
+
+                    if (data.currentPhase === 'Scanning') {
+                        logTerm.innerHTML = `<div class="log-entry">> Scanning Jira for new tickets...</div>`;
+                    }
+                }
+
+                // 3. Kanban Columns
+                const todoCol = document.getElementById('col-todo');
+                const queued = data.activeTickets.filter(t => !t.status.includes('Processing'));
+                document.getElementById('count-todo').innerText = queued.length;
+                todoCol.innerHTML = queued.length ? queued.map(t => createCard(t, 'todo')).join('') : '<div class="empty-state">Empty</div>';
+
+                const progressCol = document.getElementById('col-progress');
+                const active = data.activeTickets.filter(t => t.status.includes('Processing'));
+                document.getElementById('count-progress').innerText = active.length;
+                progressCol.innerHTML = active.length ? active.map(t => createCard(t, 'progress')).join('') : '<div class="empty-state">Empty</div>';
+
+                const doneCol = document.getElementById('col-done');
+                document.getElementById('count-done').innerText = data.scanHistory.length;
+                doneCol.innerHTML = data.scanHistory.length ? data.scanHistory.slice(0, 5).map(t => createCard(t, 'done')).join('') : '<div class="empty-state">Empty</div>';
+
+            } catch (e) { console.error(e); }
+        }
+
+        setInterval(fetchStatus, 1000);
+        fetchStatus();
+    </script>
+</body>
+
+</html>
