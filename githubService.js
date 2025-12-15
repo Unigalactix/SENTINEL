@@ -142,25 +142,11 @@ function generateWorkflowFile({ language, repoName, buildCommand, testCommand, d
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v3`;
 
-    // --- Deployment Job ---
-    let deployJob = '';
-    if (deployTarget === 'azure-webapp') {
-        deployJob = `
-  deploy:
-    runs-on: ubuntu-latest
-    needs: [build, security-scan]
-    environment: Production
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-      - name: Deploy to Azure Web App
-        uses: azure/webapps-deploy@v2
-        with:
-          app-name: 'payment-service-prod' 
-          publish-profile: \${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
-          package: .`;
-    } else if (deployTarget === 'docker') {
-        deployJob = `
+    // --- Docker Build Job (Container Ready) ---
+    let dockerJob = '';
+    // Generate Docker build for 'docker' AND 'azure-webapp' (unless explicitly opted out, which we don't support yet)
+    if (deployTarget === 'docker' || deployTarget === 'azure-webapp') {
+        dockerJob = `
   docker-build:
     runs-on: ubuntu-latest
     needs: [build, security-scan]
@@ -195,6 +181,25 @@ function generateWorkflowFile({ language, repoName, buildCommand, testCommand, d
           TRIVY_PASSWORD: \${{ secrets.GITHUB_TOKEN }}`;
     }
 
+    // --- Azure Deployment Job ---
+    let deployJob = '';
+    if (deployTarget === 'azure-webapp') {
+        deployJob = `
+  deploy:
+    runs-on: ubuntu-latest
+    needs: [build, security-scan] # Can also depend on docker-build if we were deploying the container
+    environment: Production
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+      - name: Deploy to Azure Web App
+        uses: azure/webapps-deploy@v2
+        with:
+          app-name: 'payment-service-prod' 
+          publish-profile: \${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+          package: .`;
+    }
+
     const yamlContent = `
 name: CI Pipeline - ${repoName}
 on:
@@ -216,6 +221,8 @@ ${setupSteps}
         run: ${testCommand}
 
 ${securityJob}
+
+${dockerJob}
 
 ${deployJob}
 `;
