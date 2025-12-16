@@ -511,6 +511,14 @@
     </div>
 
     <script>
+        function getLangIcon(lang) {
+            if (lang === 'python') return '🐍';
+            if (lang === 'node') return '🟢';
+            if (lang === 'dotnet') return '🔷';
+            if (lang === 'java') return '☕';
+            return '📄';
+        }
+
         function createCard(item, type) {
             const priorityClass = `status-${item.priority.split(' ')[0]}`;
 
@@ -577,6 +585,14 @@
                     <span class="card-key">${item.key}</span>
                     <span class="card-priority">${item.priority}</span>
                 </div>
+                
+                <!-- Metadata Badges -->
+                <div style="display:flex; gap:4px; margin:4px 0; flex-wrap:wrap;">
+                    ${item.language ? `<span style="background:#eee; padding:2px 6px; border-radius:4px; font-size:0.7rem;">${getLangIcon(item.language)} ${item.language}</span>` : ''}
+                    ${item.deployTarget ? `<span style="background:#e3f2fd; color:#0d47a1; padding:2px 6px; border-radius:4px; font-size:0.7rem;">🚀 ${item.deployTarget}</span>` : ''}
+                    ${item.prUrl ? `<span style="background:#e8f5e9; color:#1b5e20; padding:2px 6px; border-radius:4px; font-size:0.7rem;">🤖 Copilot Ready</span>` : ''}
+                </div>
+
                 ${statusHtml}
                 ${actionsHtml}
                 ${checksHtml}

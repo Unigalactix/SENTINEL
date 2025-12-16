@@ -220,6 +220,8 @@ async function processTicketData(issue) {
             repoName,
             branch: result.branch, // Needed for check monitoring
             payload: workflowYml, // Store payload for UI
+            language, // [NEW] for UI
+            deployTarget, // [NEW] for UI
             checks: []
         };
         systemStatus.scanHistory.unshift(historyItem);
