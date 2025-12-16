@@ -184,6 +184,7 @@ async function processTicketData(issue) {
             issueKey, // Pass issueKey for stable branching
             deployTarget, // Pass deploy target for Dockerfile generation logic
             defaultBranch,
+            repoConfig, // [NEW] Pass deep analysis results
             ticketData: { ...ticketData, buildCommand, testCommand }
         });
 

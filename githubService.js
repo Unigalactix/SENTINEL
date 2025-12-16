@@ -341,39 +341,134 @@ async function createWorkflowPR({ owner, repo, featureBranch, defaultBranch, tit
         title,
         body,
     });
+    console.log('PR created: ' + pr.html_url);
     return { pr, isNew: true };
 }
 
-
 /**
- * Generates the IMPLEMENTATION.md content for Copilot Context.
+ * Generates the Copilot Prompt (Comment Body).
  */
-function generateImplementationDoc({ issueKey, summary, description, language, buildCommand, testCommand }) {
-    return `# Implementation Plan - ${issueKey}
+function generateCopilotPrompt({ issueKey, summary, description, repoConfig, repoName, defaultBranch, language }) {
 
-## User Story
-**Title**: ${summary}
-**Issue**: ${issueKey}
+    // Map Dynamic Variables
+    const REPO_NAME = repoName;
+    const DEFAULT_BRANCH = defaultBranch;
+    const BUILD_COMMAND = repoConfig && repoConfig.buildCommand ? repoConfig.buildCommand : 'npm run build';
+    const TEST_COMMAND = repoConfig && repoConfig.testCommand ? repoConfig.testCommand : 'npm test';
 
-### Description
-${description || 'No description provided.'}
+    // CodeQL Language Mapping
+    let CODEQL_LANGUAGE = 'javascript';
+    if (language === 'python') CODEQL_LANGUAGE = 'python';
+    if (language === 'dotnet') CODEQL_LANGUAGE = 'csharp';
+    if (language === 'java') CODEQL_LANGUAGE = 'java';
 
-## Technical Context
-*   **Language**: ${language}
-*   **Build Command**: \`${buildCommand}\`
-*   **Test Command**: \`${testCommand}\`
+    return `@copilot /fix **${issueKey}: ${summary}**
 
-## Task for Copilot
-> **@copilot** Please read the requirements above and implement the necessary changes in this repository. 
-> 1. Create/Modify the code files.
-> 2. Ensure tests pass using the command above.
+${description || ''}
+
+Please generate a CI/CD pipeline file for this repo in the format below:
+
+\`\`\`yaml
+name: CI Pipeline - ${REPO_NAME}
+on:
+  push:
+    branches: [ "${DEFAULT_BRANCH}" ]
+  pull_request:
+    branches: [ "${DEFAULT_BRANCH}" ]
+env:
+  CI: true
+jobs:
+
+  --- JOB 1: BUILD & TEST ---
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+      # [DYNAMIC] Setup Logic based on Language Detected
+      # Language: ${language}
+      
+      # [DYNAMIC] Commands injected from Repo Analysis (package.json/pom.xml) or Defaults
+      - name: Build
+        run: ${BUILD_COMMAND}
+      - name: Test
+        run: ${TEST_COMMAND}
+
+  --- JOB 2: SECURITY SCANS ---
+  security-scan:
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      actions: read
+      contents: read
+    steps:
+    - uses: actions/checkout@v4
+    - name: Initialize CodeQL
+      uses: github/codeql-action/init@v3
+      with:
+        languages: ${CODEQL_LANGUAGE}
+    - name: Autobuild
+      uses: github/codeql-action/autobuild@v3
+    - name: Perform CodeQL Analysis
+      uses: github/codeql-action/analyze@v3
+
+  --- JOB 3: CONTAINERIZATION (Conditional) ---
+  # Generates if deploy target is 'docker' OR 'azure-webapp'
+  docker-build:
+    runs-on: ubuntu-latest
+    needs: [build, security-scan]
+    permissions:
+      contents: read
+      packages: write
+    steps:
+    - uses: actions/checkout@v4
+    - name: Log in to GitHub Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: \${{ github.actor }}
+        password: \${{ secrets.GITHUB_TOKEN }}
+    - name: Build and push
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        push: true
+        tags: ghcr.io/\${{ github.repository }}:latest
+    - name: Run Trivy Vulnerability Scanner
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: 'ghcr.io/\${{ github.repository }}:latest'
+        format: 'table'
+        exit-code: '1'
+        ignore-unfixed: true
+        vuln-type: 'os,library'
+        severity: 'CRITICAL,HIGH'
+      env:
+        TRIVY_USERNAME: \${{ github.actor }}
+        TRIVY_PASSWORD: \${{ secrets.GITHUB_TOKEN }}
+
+  --- JOB 4: DEPLOYMENT (Conditional) ---
+  # Generates if deploy target is 'azure-webapp'
+  deploy:
+    runs-on: ubuntu-latest
+    needs: [build, security-scan]
+    environment: Production
+    steps:
+    - uses: actions/checkout@v4
+    - name: Deploy to Azure Web App
+      uses: azure/webapps-deploy@v2
+      with:
+        app-name: 'payment-service-prod'
+        publish-profile: \${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+        package: .
+\`\`\`
 `;
 }
 
 /**
  * Orchestrates the PR Workflow.
  */
-async function createPullRequestForWorkflow({ repoName, filePath, content, language, issueKey, deployTarget, defaultBranch, ticketData }) {
+async function createPullRequestForWorkflow({ repoName, filePath, content, language, issueKey, deployTarget, defaultBranch, repoConfig, ticketData }) {
     try {
         const [owner, repo] = repoName.split('/');
 
@@ -428,32 +523,8 @@ async function createPullRequestForWorkflow({ repoName, filePath, content, langu
             filePath
         });
 
-        // 5. [NEW] Upsert IMPLEMENTATION.md (Context Injection)
-        if (ticketData) {
-            console.log('Generating IMPLEMENTATION.md for Copilot Context...');
-            // Extract Build/Test command from content if possible, or pass them in.
-            // For now, we use a simple regex or pass them if we update the function signature.
-            // To keep it simple, we'll extract "Build Command" from the passed content string (which is the YAML)
-            // Actually, we can just use generic placeholders if not passed, but passing is better.
 
-            const docContent = generateImplementationDoc({
-                issueKey,
-                summary: ticketData.summary || 'Jira Ticket',
-                description: ticketData.description,
-                language,
-                buildCommand: ticketData.buildCommand || 'See Workflow',
-                testCommand: ticketData.testCommand || 'See Workflow'
-            });
 
-            await upsertWorkflowFileOnBranch({
-                owner,
-                repo,
-                branch: featureBranch,
-                message: `docs: Add Implementation Plan for Copilot`,
-                contentBase64: Buffer.from(docContent).toString('base64'),
-                filePath: '.github/IMPLEMENTATION.md'
-            });
-        }
 
         // 6. Create PR
         const { pr, isNew } = await createWorkflowPR({
@@ -462,8 +533,30 @@ async function createPullRequestForWorkflow({ repoName, filePath, content, langu
             featureBranch,
             defaultBranch,
             title: `${issueKey}: Enable CI/CD for ${language}`,
-            body: `This PR was automatically generated by the DevOps Automation Service for Jira Ticket ${issueKey}.\n\n✅ **Copilot Ready**: I have generated \`.github/IMPLEMENTATION.md\` with the requirements.\n\nAdding ${language} workflow.${deployTarget === 'docker' ? '\n\nAlso added Dockerfile for containerization.' : ''}`
+            body: `This PR was automatically generated by the DevOps Automation Service for Jira Ticket ${issueKey}.\n\n✅ **Analysis Complete**: Detailed Requirements posted below for Copilot.\n\nAdding ${language} workflow.${deployTarget === 'docker' ? '\n\nAlso added Dockerfile for containerization.' : ''}`
         });
+
+        // 7. [NEW] Copilot Prompt Automation (Direct Comment)
+        if (ticketData) {
+            console.log('Generating Copilot Prompt for PR Comment...');
+            const promptBody = generateCopilotPrompt({
+                issueKey,
+                summary: ticketData.summary,
+                description: ticketData.description,
+                repoConfig,
+                repoName,
+                defaultBranch,
+                language
+            });
+
+            await octokit.issues.createComment({
+                owner,
+                repo,
+                issue_number: pr.number,
+                body: promptBody
+            });
+            console.log('Copilot Prompt posted to PR #' + pr.number);
+        }
 
         return { prUrl: pr.html_url, prNumber: pr.number, headSha: pr.head.sha, branch: featureBranch, isNew };
 
@@ -615,9 +708,9 @@ async function analyzeRepoStructure(repoName) {
                     else if (content.scripts.compile) result.buildCommand = 'npm run compile';
 
                     if (content.scripts.test) result.testCommand = 'npm test';
+                    if (content.scripts.start) result.runCommand = 'npm start';
                 }
                 console.log('Analyzed package.json:', result);
-                return result; // Return early if Node found
             } catch (e) {
                 console.error('Failed to parse package.json', e);
             }
@@ -626,44 +719,63 @@ async function analyzeRepoStructure(repoName) {
         // --- Java (Maven/Gradle) ---
         if (fileNames.includes('pom.xml')) {
             // Check for wrapper
-            const hasWrapper = await fileExists(owner, repo, 'mvnw'); // Helper needed or assumed check
+            const hasWrapper = await fileExists(owner, repo, 'mvnw');
             result.buildCommand = hasWrapper ? './mvnw clean package' : 'mvn clean package';
             result.testCommand = hasWrapper ? './mvnw test' : 'mvn test';
+            // Heuristic for Spring Boot run
+            result.runCommand = hasWrapper ? './mvnw spring-boot:run' : 'mvn spring-boot:run';
             console.log('Analyzed pom.xml (Maven):', result);
-            return result;
         }
-        if (fileNames.includes('build.gradle') || fileNames.includes('build.gradle.kts')) {
+        else if (fileNames.includes('build.gradle') || fileNames.includes('build.gradle.kts')) {
             const hasWrapper = await fileExists(owner, repo, 'gradlew');
             result.buildCommand = hasWrapper ? './gradlew build' : 'gradle build';
             result.testCommand = hasWrapper ? './gradlew test' : 'gradle test';
+            result.runCommand = hasWrapper ? './gradlew bootRun' : 'gradle bootRun';
             console.log('Analyzed build.gradle:', result);
-            return result;
         }
 
         // --- .NET (.sln / .csproj) ---
         const slnFile = fileNames.find(f => f.endsWith('.sln'));
+        const csprojFile = fileNames.find(f => f.endsWith('.csproj'));
+
         if (slnFile) {
             result.buildCommand = `dotnet build ${slnFile}`;
             result.testCommand = 'dotnet test';
+            result.runCommand = 'dotnet run';
             console.log(`Analyzed .sln (${slnFile}):`, result);
-            return result;
         }
-        const csprojFile = fileNames.find(f => f.endsWith('.csproj'));
-        if (csprojFile) {
+        else if (csprojFile) {
             result.buildCommand = `dotnet build ${csprojFile}`;
             result.testCommand = 'dotnet test';
+            result.runCommand = 'dotnet run';
             console.log(`Analyzed .csproj (${csprojFile}):`, result);
-            return result;
         }
 
-        // --- Python (requirements.txt) ---
-        if (fileNames.includes('requirements.txt')) {
-            // Simple inference
-            result.buildCommand = 'pip install -r requirements.txt';
+        // --- Python (requirements.txt / app.py) ---
+        // We check for python files even if requirements.txt is missing to detect run command
+        if (fileNames.includes('requirements.txt') || fileNames.some(f => f.endsWith('.py'))) {
+            // Build/Test defaults
+            if (fileNames.includes('requirements.txt')) {
+                result.buildCommand = 'pip install -r requirements.txt';
+            }
             result.testCommand = 'pytest';
-            // Could verify pytest existence by reading requirements.txt but keeping it fast for now
-            console.log('Analyzed requirements.txt:', result);
-            return result;
+
+            // Run Command Inference
+            if (fileNames.includes('manage.py')) {
+                result.runCommand = 'python manage.py runserver'; // Django
+            } else if (fileNames.includes('app.py')) {
+                result.runCommand = 'python app.py'; // Flask/Generic
+            } else if (fileNames.includes('main.py')) {
+                result.runCommand = 'python main.py'; // Generic
+            }
+
+            console.log('Analyzed Python structure:', result);
+        }
+
+        // --- Docker ---
+        if (fileNames.includes('Dockerfile')) {
+            result.dockerBuildCommand = 'docker build .';
+            console.log('Detected Dockerfile. Added dockerBuildCommand.');
         }
 
     } catch (error) {
