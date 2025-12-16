@@ -178,12 +178,13 @@ async function processTicketData(issue) {
         logProgress(`Initiating Pull Request creation sequence...`);
         const result = await createPullRequestForWorkflow({
             repoName,
-            filePath: `.github / workflows / ${repoName.split('/')[1] || 'repo'} -ci.yml`,
+            filePath: `.github/workflows/${repoName.split('/')[1] || 'repo'}-ci.yml`,
             content: workflowYml,
             language,
             issueKey, // Pass issueKey for stable branching
             deployTarget, // Pass deploy target for Dockerfile generation logic
-            defaultBranch
+            defaultBranch,
+            ticketData: { ...ticketData, buildCommand, testCommand, description }
         });
 
         systemStatus.currentPrUrl = result.prUrl;
