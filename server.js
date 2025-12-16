@@ -79,8 +79,11 @@ async function processTicketData(issue) {
     const projectKey = issueKey.split('-')[0];
 
     // Dynamic Default Repo Lookup
-    const defaultRepoEnvVar = `DEFAULT_REPO_${projectKey} `;
+    const defaultRepoEnvVar = `DEFAULT_REPO_${projectKey}`;
     const projectDefaultRepo = process.env[defaultRepoEnvVar];
+
+    // Debug: Log repo lookup attempts
+    console.log(`[Repo Lookup] ProjectKey: ${projectKey}, EnvVar: ${defaultRepoEnvVar}, Value: ${projectDefaultRepo}`);
 
     const repoName = ticketData.customfield_repo || ticketData.repoName || projectDefaultRepo || 'Unigalactix/sample-node-project';
 
