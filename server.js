@@ -16,7 +16,9 @@ const {
     triggerExistingWorkflow,
     deleteBranch,
     markPullRequestReadyForReview,
-    mergePullRequest
+    mergePullRequest,
+    enablePullRequestAutoMerge,
+    isPullRequestMerged
 } = require('./githubService');
 const { getPendingTickets, transitionIssue, addComment } = require('./jiraService');
 require('dotenv').config();
@@ -497,16 +499,20 @@ async function startPolling() {
                                         ticket.toolUsed = "Autopilot"; // [NEW] Track tool usage
                                     }
 
-                                    // Use Merge PR endpoint (High Level)
-                                    const mergeRes = await mergePullRequest({ repoName: ticket.repoName, pullNumber: subPr.number });
-
-                                    if (mergeRes.merged) {
-                                        ticket.copilotMerged = true;
-                                        ticket.copilotMergedAt = new Date().toISOString(); // [NEW] Capture Merge Time
-                                        logProgress(`Copilot revisions merged for ${ticket.key}. Posting comment...`);
-                                        await addComment(ticket.key, `🤖 **Copilot Update**: I have merged the proposed changes into the feature branch.\n\nRunning checks... ⏳\n[View Actions](${ticket.repoName ? `https://github.com/${ticket.repoName}/actions` : '#'})`);
+                                    // Enable GitHub Auto-Merge on the sub PR
+                                    const autoRes = await enablePullRequestAutoMerge({ repoName: ticket.repoName, pullNumber: subPr.number, mergeMethod: 'SQUASH' });
+                                    if (autoRes.ok) {
+                                        ticket.autoMergeEnabled = true;
+                                        logProgress(`Auto-merge enabled for Copilot SubPR #${subPr.number} on ${ticket.key}.`);
+                                        await addComment(ticket.key, `🤖 **Copilot Update**: Auto-merge has been enabled for the sub-PR #${subPr.number}.\n\nIt will merge once all required checks pass.`);
+                                        // Opportunistic check: mark merged flag if already merged
+                                        const mergedCheck = await isPullRequestMerged({ repoName: ticket.repoName, pullNumber: subPr.number });
+                                        if (mergedCheck.merged) {
+                                            ticket.copilotMerged = true;
+                                            ticket.copilotMergedAt = new Date().toISOString();
+                                        }
                                     } else {
-                                        console.log(`[Autopilot] ⚠️ Merge failed for SubPR #${subPr.number}: ${mergeRes.message}`);
+                                        console.log(`[Autopilot] ⚠️ Auto-merge enable failed for SubPR #${subPr.number}: ${autoRes.message}`);
                                     }
                                 } else {
                                     console.log(`[Autopilot] ⏳ SubPR #${subPr.number} detected but marked WIP. Waiting... (Title: "${subPr.title}")`);

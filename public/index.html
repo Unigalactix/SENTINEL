@@ -213,12 +213,11 @@
         }
 
 
-        /* --- Kanban Board Spacing Update --- */
+        /* --- Kanban Board --- */
         .kanban-board {
             display: grid;
             grid-template-columns: repeat(5, 1fr);
-            gap: 2rem;
-            /* Increased Gap */
+            gap: 1.5rem;
             flex: 1;
             align-items: start;
         }
@@ -226,52 +225,198 @@
         .column {
             background: var(--column-bg);
             border-radius: 12px;
-            padding: 1.25rem;
-            /* Better Padding */
+            padding: 1rem;
             min-height: 400px;
             display: flex;
             flex-direction: column;
-            gap: 1.25rem;
-            /* Increased Card Spacing */
+            gap: 1rem;
         }
 
-        /* [NEW] Timing Badge */
-        .timing-pill {
-            background-color: #f0f0f0;
-            color: #666;
-            padding: 2px 6px;
-            border-radius: 4px;
-            font-size: 0.7rem;
+        .column-header {
+            font-size: 0.95rem;
+            font-weight: 700;
+            color: var(--text-sub);
+            text-transform: uppercase;
+            padding: 0 4px;
             display: flex;
+            justify-content: space-between;
+        }
+
+        .count-badge {
+            background: rgba(9, 30, 66, 0.08);
+            border-radius: 12px;
+            padding: 2px 8px;
+            color: var(--text-main);
+            font-size: 0.85rem;
+        }
+
+        .kanban-card {
+            background: var(--card-bg);
+            border-radius: 8px;
+            padding: 1rem;
+            box-shadow: 0 1px 2px rgba(9, 30, 66, 0.25);
+            border-left: 4px solid transparent;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .kanban-card.status-High,
+        .kanban-card.status-Highest {
+            border-left-color: var(--danger);
+        }
+
+        .kanban-card.status-Medium {
+            border-left-color: var(--warn);
+        }
+
+        .kanban-card.status-Low,
+        .kanban-card.status-Lowest {
+            border-left-color: var(--success);
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .card-key {
+            font-weight: 700;
+            color: var(--text-main);
+        }
+
+        .card-priority {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            color: var(--text-sub);
+            font-weight: 600;
+        }
+
+        .result-pill {
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            display: inline-block;
+        }
+
+        .result-Success {
+            background: #E3FCEF;
+            color: #006644;
+        }
+
+        .result-Failed {
+            background: #FFEBE6;
+            color: #DE350B;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 2rem 0;
+            color: var(--text-sub);
+            opacity: 0.7;
+            font-size: 0.9rem;
+        }
+
+        .timer-val {
+            font-weight: 700;
+            color: var(--primary);
+        }
+
+        /* --- Modal --- */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(2px);
+            display: none;
+            justify-content: center;
             align-items: center;
-            gap: 4px;
-            border: 1px solid #ddd;
+            z-index: 1000;
+            opacity: 0;
+            transition: opacity 0.2s ease;
         }
 
-        .timing-pill.active {
-            color: #0052CC;
-            border-color: #B3D4FF;
-            background-color: #DEEBFF;
-            animation: pulse-blue 2s infinite;
+        .modal-overlay.active {
+            opacity: 1;
         }
 
-        @keyframes pulse-blue {
-            0% {
-                box-shadow: 0 0 0 0 rgba(0, 82, 204, 0.4);
-            }
+        .modal-content {
+            background: #252526;
+            width: 80%;
+            max-width: 900px;
+            max-height: 80vh;
+            border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4);
+            display: flex;
+            flex-direction: column;
+            transform: scale(0.95);
+            transition: transform 0.2s ease;
+            color: #d4d4d4;
+        }
 
-            70% {
-                box-shadow: 0 0 0 4px rgba(0, 82, 204, 0);
-            }
+        .modal-overlay.active .modal-content {
+            transform: scale(1);
+        }
 
-            100% {
-                box-shadow: 0 0 0 0 rgba(0, 82, 204, 0);
-            }
+        .modal-header {
+            padding: 1rem 1.5rem;
+            border-bottom: 1px solid #3c3c3c;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .modal-header h3 {
+            margin: 0;
+            font-size: 1.1rem;
+            color: #9cdcfe;
+        }
+
+        .btn-close {
+            background: none;
+            border: none;
+            color: #d4d4d4;
+            font-size: 1.5rem;
+            cursor: pointer;
+            padding: 0;
+            line-height: 1;
+        }
+
+        .btn-close:hover {
+            color: white;
+        }
+
+        .modal-body {
+            padding: 0;
+            overflow-y: auto;
+            flex: 1;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 0.9rem;
+        }
+
+        /* Specific style for code block inside modal */
+        #modalPayloadContent {
+            margin: 0;
+            padding: 1.5rem;
+            white-space: pre-wrap;
+        }
+
+        .btn-payload {
+            background-color: #6554C0;
+            /* Purple */
+            color: white;
+            cursor: pointer;
         }
     </style>
 </head>
 
 <body>
+
     <div class="container">
         <header>
             <div class="board-title">
@@ -319,6 +464,7 @@
             <div class="hero-logs" id="logTerminal">
                 <div class="log-entry">> System ready. Waiting for tasks...</div>
             </div>
+            <!-- Payload Viewer Removed (Moved to Modal) -->
         </div>
 
         <!-- Kanban Board -->
@@ -363,14 +509,14 @@
             </div>
         </div>
     </div>
-    <script>
-        // ... (getLangIcon remains same) ...
 
-        function formatDuration(ms) {
-            const sec = Math.floor(ms / 1000);
-            if (sec < 60) return sec + 's';
-            const min = Math.floor(sec / 60);
-            return min + 'm ' + (sec % 60) + 's';
+    <script>
+        function getLangIcon(lang) {
+            if (lang === 'python') return '🐍';
+            if (lang === 'node') return '🟢';
+            if (lang === 'dotnet') return '🔷';
+            if (lang === 'java') return '☕';
+            return '📄';
         }
 
         function createCard(item, type) {
@@ -379,48 +525,53 @@
             // Status Pill or Text
             const statusHtml = type === 'done'
                 ? `<span class="result-pill result-${item.result}">${item.result}</span>`
-                : `<span style="font-size:0.85rem; color:#5E6C84; font-weight:600;">${item.status}</span>`;
+                : `<span style="font-size:0.85rem; color:#5E6C84">${item.status}</span>`;
 
             // Action Buttons for DONE items
             let actionsHtml = '';
-            // ... (Same logic for buttons, see below for badge additions)
             if (item.jiraUrl || item.prUrl) {
-                actionsHtml = `<div style="display:flex; gap:8px; margin-top:8px;">`;
+                actionsHtml = `<div style="display:flex; gap:8px; margin-top:4px;">`;
                 if (item.jiraUrl) {
                     actionsHtml += `<a href="${item.jiraUrl}" target="_blank" class="btn btn-small btn-jira" style="text-decoration:none;">Jira</a>`;
                 }
                 if (item.prUrl) {
-                    // actionsHtml += `<a href="${item.prUrl}" target="_blank" class="btn btn-small btn-github" style="text-decoration:none;">PR</a>`;
-                    const copilotLink = item.copilotPrUrl ? item.copilotPrUrl : item.prUrl;
-                    const label = item.copilotPrUrl ? "Copilot PR" : "PR";
-                    actionsHtml += `<a href="${copilotLink}" target="_blank" class="btn btn-small btn-github" aria-label="Open PR" style="text-decoration:none;">${label}</a>`;
+                    actionsHtml += `<a href="${item.prUrl}" target="_blank" class="btn btn-small btn-github" style="text-decoration:none;">PR</a>`;
+                    // Additional shortcut specifically for CI/CD columns: "PR by Copilot"
+                    actionsHtml += `<a href="${item.prUrl}" target="_blank" class="btn btn-small btn-github" aria-label="Open PR by Copilot" style="text-decoration:none;">Copilot PR</a>`;
                 }
+                // Payload Button for History
                 if (item.payload) {
                     actionsHtml += `<button onclick="openHistoryPayload('${item.key}')" class="btn btn-small btn-payload" style="border:none; border-radius:6px; padding:4px 12px; font-size:0.75rem; font-weight:600; text-transform:uppercase;">YAML</button>`;
                 }
                 actionsHtml += `</div>`;
             }
 
-            // Checks HTML (Same)
+            // Detailed Checks List
             let checksHtml = '';
             if (item.checks && item.checks.length > 0) {
-                checksHtml = '<div style="margin-top:12px; padding-top:8px; border-top:1px solid #eee; display:flex; flex-direction:column; gap:4px;">';
-                // ... checks mapping ...
+                checksHtml = '<div style="margin-top:8px; padding-top:4px; border-top:1px solid #eee; display:flex; flex-direction:column; gap:2px;">';
                 item.checks.forEach(c => {
                     let color = '#42526E';
                     let statusText = c.conclusion || c.status;
                     let icon = '⚫';
-                    const lowerName = c.name.toLowerCase();
-                    const isSecurity = lowerName.includes('codeql') || lowerName.includes('trivy');
 
-                    if (c.conclusion === 'success') { color = '#006644'; icon = isSecurity ? '🛡️' : '✅'; }
-                    else if (c.conclusion === 'failure') { color = '#DE350B'; icon = isSecurity ? '🛡️ ❌' : '❌'; }
+                    const lowerName = c.name.toLowerCase();
+                    const isSecurity = lowerName.includes('security') || lowerName.includes('codeql') || lowerName.includes('trivy');
+
+                    if (c.conclusion === 'success') {
+                        color = '#006644';
+                        icon = isSecurity ? '🛡️' : '✅';
+                    }
+                    else if (c.conclusion === 'failure') {
+                        color = '#DE350B';
+                        icon = isSecurity ? '🛡️ ❌' : '❌';
+                    }
                     else if (c.conclusion === 'cancelled') { color = '#FF991F'; icon = '⚠️'; }
                     else if (c.status === 'in_progress') { color = '#0052CC'; icon = '⏳'; }
 
                     checksHtml += `
                     <div style="font-size:0.75rem; color:${color}; display:flex; align-items:center; justify-content:space-between;">
-                        <span style="display:flex; align-items:center; gap:6px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; max-width:70%;">
+                        <span style="display:flex; align-items:center; gap:4px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; max-width:70%;">
                             <span>${icon}</span> ${c.name}
                         </span>
                         <span style="font-weight:600; font-size:0.7rem;">${statusText}</span>
@@ -429,35 +580,6 @@
                 checksHtml += '</div>';
             }
 
-            // [NEW] Timing & Tool Badges
-            let timingHtml = '';
-            if (item.copilotCreatedAt) {
-                const start = new Date(item.copilotCreatedAt).getTime();
-                let end = Date.now();
-                let isActive = true;
-
-                if (item.copilotMergedAt) {
-                    end = new Date(item.copilotMergedAt).getTime();
-                    isActive = false;
-                } else if (type === 'done' || item.result === 'Failed') {
-                    // If done but not merged (e.g. failed), stop timer
-                    isActive = false;
-                }
-
-                const diff = end - start;
-                const durationStr = formatDuration(diff);
-                const label = isActive ? '⏱️ Merging...' : '⏱️ Time to Merge';
-                const activeClass = isActive ? 'active' : '';
-
-                timingHtml = `
-                <div style="display:flex; justify-content:space-between; margin-top:8px;">
-                     <div class="timing-pill ${activeClass}">
-                        ${label}: <strong>${durationStr}</strong>
-                     </div>
-                     ${item.toolUsed ? `<div class="timing-pill" style="background:#EAE6FF; color:#403294; border-color:#dcd6ff;">🔧 ${item.toolUsed}</div>` : ''}
-                </div>
-                `;
-            }
 
             return `
             <div class="kanban-card ${priorityClass}">
@@ -467,14 +589,13 @@
                 </div>
                 
                 <!-- Metadata Badges -->
-                <div style="display:flex; gap:6px; margin:8px 0; flex-wrap:wrap;">
+                <div style="display:flex; gap:4px; margin:4px 0; flex-wrap:wrap;">
                     ${item.language ? `<span style="background:#eee; padding:2px 6px; border-radius:4px; font-size:0.7rem;">${getLangIcon(item.language)} ${item.language}</span>` : ''}
                     ${item.deployTarget ? `<span style="background:#e3f2fd; color:#0d47a1; padding:2px 6px; border-radius:4px; font-size:0.7rem;">🚀 ${item.deployTarget}</span>` : ''}
                     ${item.prUrl ? `<span style="background:#e8f5e9; color:#1b5e20; padding:2px 6px; border-radius:4px; font-size:0.7rem;">🤖 Copilot Ready</span>` : ''}
                 </div>
 
                 ${statusHtml}
-                ${timingHtml}
                 ${actionsHtml}
                 ${checksHtml}
             </div>`;

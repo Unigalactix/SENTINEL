@@ -952,17 +952,14 @@ async function deleteBranch({ repoName, branchName }) {
 async function markPullRequestReadyForReview({ repoName, pullNumber }) {
     const [owner, repo] = repoName.split('/');
     try {
-        await octokit.pulls.update({
-            owner,
-            repo,
-            pull_number: pullNumber,
-            draft: false
-        });
-        console.log(`PR #${pullNumber} marked as Ready for Review.`);
-        return { success: true };
+        const { data: pr } = await octokit.pulls.get({ owner, repo, pull_number: pullNumber });
+        const nodeId = pr.node_id;
+        const mutation = `mutation($pullRequestId: ID!) {\n  markPullRequestReadyForReview(input: { pullRequestId: $pullRequestId }) {\n    pullRequest { id isDraft }\n  }\n}`;
+        const result = await octokit.graphql(mutation, { pullRequestId: nodeId });
+        return { ok: true, result };
     } catch (e) {
-        console.warn(`Failed to undraft PR #${pullNumber}:`, e.message);
-        return { success: false, error: e.message };
+        console.warn('markPullRequestReadyForReview failed:', e.message);
+        return { ok: false, message: e.message };
     }
 }
 
@@ -984,23 +981,32 @@ async function mergePullRequest({ repoName, pullNumber, method = 'squash' }) {
     }
 }
 
-module.exports = {
-    generateWorkflowFile,
-    createPullRequestForWorkflow,
-    getPullRequestChecks,
-    detectRepoLanguage,
-    getRepoInstructions,
-    analyzeRepoStructure,
-    getDefaultBranch,
-    findCopilotSubPR,
-    mergeSubPRIntoBranch,
-    getPullRequestDetails,
-    hasExistingWorkflow,
-    triggerExistingWorkflow,
-    deleteBranch,
-    markPullRequestReadyForReview,
-    mergePullRequest
-};
+// Enable auto-merge for a PR via GraphQL
+async function enablePullRequestAutoMerge({ repoName, pullNumber, mergeMethod = 'SQUASH' }) {
+    const [owner, repo] = repoName.split('/');
+    try {
+        const { data: pr } = await octokit.pulls.get({ owner, repo, pull_number: pullNumber });
+        const nodeId = pr.node_id;
+        const mutation = `mutation($pullRequestId: ID!, $mergeMethod: PullRequestMergeMethod!) {\n  enablePullRequestAutoMerge(input: { pullRequestId: $pullRequestId, mergeMethod: $mergeMethod }) {\n    pullRequest { id number state }\n  }\n}`;
+        const result = await octokit.graphql(mutation, { pullRequestId: nodeId, mergeMethod });
+        return { ok: true, result };
+    } catch (e) {
+        console.warn('enablePullRequestAutoMerge failed:', e.message);
+        return { ok: false, message: e.message };
+    }
+}
+
+// Check if a PR is merged
+async function isPullRequestMerged({ repoName, pullNumber }) {
+    const [owner, repo] = repoName.split('/');
+    try {
+        await octokit.pulls.checkIfMerged({ owner, repo, pull_number: pullNumber });
+        return { merged: true };
+    } catch (e) {
+        // 404 if not merged
+        return { merged: false };
+    }
+}
 
 /**
  * Get details for a PR by number.
@@ -1011,8 +1017,13 @@ async function getPullRequestDetails({ repoName, pull_number }) {
     return data;
 }
 
+/**
+ * Mark a draft Pull Request as Ready for Review using GitHub GraphQL API.
+ */
 module.exports = {
-    generateWorkflowFile, createPullRequestForWorkflow, getPullRequestChecks,
+    generateWorkflowFile,
+    createPullRequestForWorkflow,
+    getPullRequestChecks,
     detectRepoLanguage,
     generateDockerfile,
     analyzeRepoStructure,
@@ -1022,6 +1033,11 @@ module.exports = {
     triggerExistingWorkflow,
     findCopilotSubPR,
     mergeSubPRIntoBranch,
-    getPullRequestDetails
+    getPullRequestDetails,
+    deleteBranch,
+    markPullRequestReadyForReview,
+    mergePullRequest,
+    enablePullRequestAutoMerge,
+    isPullRequestMerged
 };
 
