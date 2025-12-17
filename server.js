@@ -358,7 +358,10 @@ async function processTicketData(issue) {
             deployTarget, // [NEW] for UI
             checks: [],
             copilotPrUrl: null,
-            copilotMerged: false
+            copilotMerged: false,
+            copilotCreatedAt: null, // [NEW]
+            copilotMergedAt: null,   // [NEW]
+            toolUsed: null           // [NEW]
         };
         systemStatus.scanHistory.unshift(historyItem);
         // Add to monitored list
@@ -472,6 +475,11 @@ async function startPolling() {
                             const subPr = await findCopilotSubPR({ repoName: ticket.repoName, mainPrNumber });
                             if (subPr) {
                                 ticket.copilotPrUrl = subPr.html_url;
+                                // [NEW] Capture Creation Time for Timer
+                                if (!ticket.copilotCreatedAt) {
+                                    ticket.copilotCreatedAt = subPr.created_at;
+                                }
+
                                 const hasWipLabel = Array.isArray(subPr.labels) && subPr.labels.some(l => /\bWIP\b/i.test(l.name || ''));
                                 const isWipTitle = /\bWIP\b/i.test(subPr.title || '');
                                 // const isDraft = !!subPr.draft; // User Requested to ignore Draft as a blocker
@@ -484,6 +492,9 @@ async function startPolling() {
                                     if (subPr.draft) {
                                         console.log(`[Autopilot] SubPR #${subPr.number} is Draft. Mark as Ready for Review...`);
                                         await markPullRequestReadyForReview({ repoName: ticket.repoName, pullNumber: subPr.number });
+                                        ticket.toolUsed = "Autopilot + Undraft"; // [NEW] Track tool usage
+                                    } else {
+                                        ticket.toolUsed = "Autopilot"; // [NEW] Track tool usage
                                     }
 
                                     // Use Merge PR endpoint (High Level)
@@ -491,6 +502,7 @@ async function startPolling() {
 
                                     if (mergeRes.merged) {
                                         ticket.copilotMerged = true;
+                                        ticket.copilotMergedAt = new Date().toISOString(); // [NEW] Capture Merge Time
                                         logProgress(`Copilot revisions merged for ${ticket.key}. Posting comment...`);
                                         await addComment(ticket.key, `🤖 **Copilot Update**: I have merged the proposed changes into the feature branch.\n\nRunning checks... ⏳\n[View Actions](${ticket.repoName ? `https://github.com/${ticket.repoName}/actions` : '#'})`);
                                     } else {
