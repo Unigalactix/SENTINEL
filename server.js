@@ -18,7 +18,8 @@ const {
     markPullRequestReadyForReview,
     mergePullRequest,
     enablePullRequestAutoMerge,
-    isPullRequestMerged
+    isPullRequestMerged,
+    approvePullRequest
 } = require('./githubService');
 const { getPendingTickets, transitionIssue, addComment } = require('./jiraService');
 require('dotenv').config();
@@ -167,7 +168,53 @@ async function processTicketData(issue) {
     // Debug: Log repo lookup attempts
     console.log(`[Repo Lookup] ProjectKey: ${projectKey}, EnvVar: ${defaultRepoEnvVar}, Value: ${projectDefaultRepo}`);
 
-    const repoName = ticketData.customfield_repo || ticketData.repoName || projectDefaultRepo || 'Unigalactix/sample-node-project';
+    // Resolve repo from fields, then description/summary, then env default
+    function extractOwnerRepo(txt) {
+        if (!txt || typeof txt !== 'string') return null;
+        const m = txt.match(/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)/);
+        return m ? `${m[1]}/${m[2]}` : null;
+    }
+
+    const fieldRepo = (ticketData.customfield_repo || ticketData.repoName || '').trim();
+    const descRepo = extractOwnerRepo(ticketData.description) || extractOwnerRepo(ticketData.summary);
+    const repoName = fieldRepo || descRepo || projectDefaultRepo || 'Unigalactix/sample-node-project';
+
+    // Pre-validate repo access and cache default branch
+    let resolvedDefaultBranch = null;
+
+    // Enforce allowed orgs scope
+    const defaultOwner = (projectDefaultRepo || process.env.DEFAULT_REPO || 'Unigalactix/sample-node-project').split('/')[0];
+    const allowedOrgs = (process.env.ALLOWED_ORGS ? process.env.ALLOWED_ORGS.split(',') : [defaultOwner])
+        .map(s => s.trim())
+        .filter(Boolean);
+    const targetOwner = (repoName.split('/')[0] || '').trim();
+    if (targetOwner && allowedOrgs.length && !allowedOrgs.includes(targetOwner)) {
+        const msg = `Org out of scope: "${targetOwner}". Allowed orgs: ${allowedOrgs.join(', ')}`;
+        logProgress(msg);
+        if (issueKey) {
+            await addComment(issueKey, `❌ ${msg}`);
+            await transitionIssue(issueKey, 'To Do');
+        }
+        // Stop processing this ticket
+        systemStatus.activeTickets = systemStatus.activeTickets.filter(t => t.key !== issueKey);
+        return;
+    }
+
+    // Validate repo existence/access early
+    try {
+        resolvedDefaultBranch = await getDefaultBranch(repoName);
+        logProgress(`Validated repository access for ${repoName}. Default branch: ${resolvedDefaultBranch}`);
+    } catch (e) {
+        const reason = e?.message || 'Unknown error';
+        const msg = `Repository not accessible: ${repoName}. Reason: ${reason}. Ensure GHUB_TOKEN has repo access and the repo exists.`;
+        logProgress(msg);
+        if (issueKey) {
+            await addComment(issueKey, `❌ ${msg}`);
+            await transitionIssue(issueKey, 'To Do');
+        }
+        systemStatus.activeTickets = systemStatus.activeTickets.filter(t => t.key !== issueKey);
+        return;
+    }
 
     // Smart Language Detection
     let language = ticketData.customfield_language || ticketData.language;
@@ -248,7 +295,7 @@ async function processTicketData(issue) {
         if (issueKey) await transitionIssue(issueKey, 'In Progress');
 
         // 1b. Get Default Branch (Dynamic)
-        const defaultBranch = await getDefaultBranch(repoName);
+        const defaultBranch = resolvedDefaultBranch || await getDefaultBranch(repoName);
         logProgress(`Targeting default branch: ${defaultBranch} `);
 
         // 2.1 Optional: Apply ticket-specific Copilot fixes to target files before PR
@@ -499,6 +546,10 @@ async function startPolling() {
                                         ticket.toolUsed = "Autopilot"; // [NEW] Track tool usage
                                     }
 
+                                    // [NEW] Auto-Approve the PR
+                                    console.log(`[Autopilot] Auto-approving SubPR #${subPr.number}...`);
+                                    await approvePullRequest({ repoName: ticket.repoName, pullNumber: subPr.number });
+
                                     // Enable GitHub Auto-Merge on the sub PR
                                     const autoRes = await enablePullRequestAutoMerge({ repoName: ticket.repoName, pullNumber: subPr.number, mergeMethod: 'SQUASH' });
                                     if (autoRes.ok) {
@@ -513,6 +564,19 @@ async function startPolling() {
                                         }
                                     } else {
                                         console.log(`[Autopilot] ⚠️ Auto-merge enable failed for SubPR #${subPr.number}: ${autoRes.message}`);
+
+                                        // Fallback: If Auto-Merge fails (e.g. "clean status" which implies ready, or not protected), try immediate merge
+                                        console.log(`[Autopilot] Attempting immediate merge for SubPR #${subPr.number} as fallback...`);
+                                        const mergeRes = await mergePullRequest({ repoName: ticket.repoName, pullNumber: subPr.number, method: 'squash' });
+
+                                        if (mergeRes.merged) {
+                                            ticket.copilotMerged = true;
+                                            ticket.copilotMergedAt = new Date().toISOString();
+                                            logProgress(`Successfully merged Copilot SubPR #${subPr.number} (Fallback).`);
+                                            await addComment(ticket.key, `🤖 **Copilot Update**: PR #${subPr.number} was merged successfully.`);
+                                        } else {
+                                            console.log(`[Autopilot] ❌ Immediate merge also failed: ${mergeRes.message}`);
+                                        }
                                     }
                                 } else {
                                     console.log(`[Autopilot] ⏳ SubPR #${subPr.number} detected but marked WIP. Waiting... (Title: "${subPr.title}")`);
