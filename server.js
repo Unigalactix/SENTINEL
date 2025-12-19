@@ -360,7 +360,7 @@ async function processTicketData(issue) {
         logProgress(`Initiating Pull Request creation sequence...`);
         const result = await createPullRequestForWorkflow({
             repoName,
-            filePath: `.github/workflows/${repoName.split('/')[1] || 'repo'}-ci.yml`,
+            filePath: `.github/workflows/ci.yml`,
             content: workflowYml,
             language,
             issueKey, // Pass issueKey for stable branching

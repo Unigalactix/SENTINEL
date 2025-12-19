@@ -173,31 +173,33 @@ function generateWorkflowFile({ language, repoName, buildCommand, testCommand, d
     }
 
     // --- Azure Deployment Job ---
-    let deployJob = '';
-    if (deployTarget === 'azure-webapp') {
-        deployJob = `
-  deploy:
-    runs-on: ubuntu-latest
-    needs: [build, security-scan] # Can also depend on docker-build if we were deploying the container
-    environment: Production
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-      - name: Deploy to Azure Web App
-        uses: azure/webapps-deploy@v2
-        with:
-          app-name: 'mvdemoapp' 
-          publish-profile: \${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
-          package: .`;
-    }
+        let deployJob = '';
+        if (deployTarget === 'azure-webapp') {
+                deployJob = `
+    deploy:
+        runs-on: ubuntu-latest
+        needs: [build, security-scan] # Can also depend on docker-build if we were deploying the container
+        environment: Production
+        steps:
+            - name: Checkout Repository
+                uses: actions/checkout@v4
+            - name: Deploy to Azure Web App
+                uses: azure/webapps-deploy@v2
+                with:
+                    app-name: \${{ secrets.AZURE_WEBAPP_APP_NAME }}
+                    publish-profile: \${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+                    package: .
+                    slot-name: \${{ secrets.AZURE_WEBAPP_SLOT_NAME }}`;
+        }
 
     const yamlContent = `
-name: CI Pipeline - ${repoName}
-on:
-    push:
-        branches: [ "${defaultBranch}" ]
-    pull_request:
-        branches: [ "${defaultBranch}" ]
+    name: CI Pipeline - ${repoName}
+    on:
+            workflow_dispatch:
+            push:
+                    branches: [ "${defaultBranch}" ]
+            pull_request:
+                    branches: [ "${defaultBranch}" ]
 env:
   CI: true
 jobs:
@@ -439,7 +441,7 @@ jobs:
     - name: Deploy to Azure Web App
       uses: azure/webapps-deploy@v2
       with:
-        app-name: 'mvdemoapp'
+        app-name: 'democicd111'
         publish-profile: \${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
                     package: .
                     slot-name: production

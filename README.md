@@ -37,6 +37,16 @@ A comprehensive Node.js automation service that bridges Jira and GitHub. It acts
 -   **Tag format**: `${{ secrets.ACR_LOGIN_SERVER }}/${{ env.REPO_LOWER }}:latest` and `:${{ github.sha }}`
 -   The workflow computes `REPO_LOWER` from `${{ github.repository }}` to ensure lowercase tags.
 
+## Azure Web App Deploy Secrets
+
+For publish-profile zip deploy to Azure Web Apps, ensure the target repository has these GitHub Actions secrets configured:
+
+- `AZURE_WEBAPP_APP_NAME`: The Web App name (e.g., `myapp-web`)
+- `AZURE_WEBAPP_SLOT_NAME`: The deployment slot (e.g., `production`)
+- `AZURE_WEBAPP_PUBLISH_PROFILE`: The full publish profile XML content
+
+These are referenced by the generated workflow in the `deploy` job using `azure/webapps-deploy@v2`.
+
 ## Prerequisites
 
 -   **Node.js** (v18 or higher)
