@@ -5,89 +5,204 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Jira Autopilot Command Center</title>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <!-- Fonts: Inter (UI) and JetBrains Mono (Code/Terminal) -->
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+        rel="stylesheet">
     <style>
         :root {
-            --bg: #F4F5F7;
-            --column-bg: #EBECF0;
-            --card-bg: #FFFFFF;
-            --text-main: #172B4D;
-            --text-sub: #5E6C84;
-            --primary: #0052CC;
-            --success: #36B37E;
-            --danger: #FF5630;
-            --warn: #FFAB00;
+            /* --- Dark Glass Palette --- */
+            --bg-deep: #0f111a;
+
+            /* Glass Surfaces */
+            --glass-surface: rgba(255, 255, 255, 0.03);
+            --glass-border: rgba(255, 255, 255, 0.08);
+            --glass-highlight: rgba(255, 255, 255, 0.1);
+            --glass-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+
+            /* Text Colors */
+            --text-main: #e2e8f0;
+            --text-muted: #94a3b8;
+            --text-dim: #64748b;
+
+            /* Accents */
+            --primary: #3b82f6;
+            /* Blue */
+            --primary-glow: rgba(59, 130, 246, 0.5);
+            --success: #10b981;
+            /* Emerald */
+            --success-glow: rgba(16, 185, 129, 0.4);
+            --warning: #f59e0b;
+            /* Amber */
+            --danger: #ef4444;
+            /* Red */
+            --purple: #8b5cf6;
+            /* Violet */
         }
 
         body {
-            font-family: 'Outfit', sans-serif;
-            background-color: var(--bg);
+            font-family: 'Inter', sans-serif;
+            background: var(--bg-deep);
             color: var(--text-main);
             margin: 0;
             padding: 2rem;
             min-height: 100vh;
             display: flex;
             flex-direction: column;
+            overflow-x: hidden;
+            position: relative;
         }
 
-        /* --- Layout --- */
+        /* --- Ambient Motion Background --- */
+        .ambient-bg {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background:
+                radial-gradient(circle at 15% 50%, rgba(59, 130, 246, 0.08), transparent 25%),
+                radial-gradient(circle at 85% 30%, rgba(139, 92, 246, 0.08), transparent 25%);
+            z-index: -1;
+            animation: bgPulse 10s ease-in-out infinite alternate;
+            pointer-events: none;
+        }
+
+        @keyframes bgPulse {
+            0% {
+                transform: scale(1);
+                opacity: 0.5;
+            }
+
+            100% {
+                transform: scale(1.1);
+                opacity: 0.8;
+            }
+        }
+
+        /* --- Global Scrollbar --- */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: rgba(0, 0, 0, 0.2);
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.15);
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.25);
+        }
+
+        /* --- Layout & Glass Containers --- */
         .container {
-            max-width: 1200px;
+            max-width: 1400px;
             margin: 0 auto;
             width: 100%;
             display: flex;
             flex-direction: column;
-            gap: 2rem;
+            gap: 2.5rem;
             flex: 1;
+        }
+
+        /* Glass Utility Class */
+        .glass-panel {
+            background: var(--glass-surface);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid var(--glass-border);
+            border-radius: 16px;
+            box-shadow: var(--glass-shadow);
+            transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
         }
 
         header {
             display: flex;
             justify-content: space-between;
             align-items: center;
+            padding: 0 0.5rem;
         }
 
+        /* --- Header Elements --- */
         .board-title {
-            font-size: 1.8rem;
+            font-size: 2rem;
             font-weight: 700;
-            color: var(--text-main);
+            letter-spacing: -0.02em;
+            color: white;
             display: flex;
             align-items: center;
-            gap: 12px;
+            gap: 16px;
+            text-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
+        }
+
+        .board-title svg {
+            filter: drop-shadow(0 0 8px var(--primary-glow));
+            color: var(--primary);
         }
 
         .timer-badge {
-            background: white;
-            color: var(--text-main);
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid var(--glass-border);
+            color: var(--text-muted);
             padding: 8px 16px;
-            border-radius: 20px;
-            font-weight: 600;
-            font-size: 0.9rem;
+            border-radius: 99px;
+            /* Pill shape */
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.85rem;
             display: flex;
             align-items: center;
-            gap: 8px;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+            gap: 10px;
+        }
+
+        .timer-val {
+            color: var(--primary);
+            font-weight: 700;
+            text-shadow: 0 0 10px rgba(59, 130, 246, 0.4);
         }
 
         /* --- Hero Section (Live Agent) --- */
         .hero-section {
-            background: white;
-            border-radius: 16px;
-            padding: 2rem;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+            padding: 2.5rem;
             display: flex;
-            gap: 2rem;
-            min-height: 250px;
-            transition: all 0.3s ease;
+            gap: 2.5rem;
+            min-height: 280px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        /* Glow effect behind Hero */
+        .hero-section::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -10%;
+            width: 50%;
+            height: 200%;
+            background: radial-gradient(circle, rgba(59, 130, 246, 0.05) 0%, transparent 70%);
+            z-index: 0;
+            pointer-events: none;
         }
 
         .hero-section.idle {
-            opacity: 0.6;
-            filter: grayscale(100%);
+            opacity: 0.7;
+            filter: grayscale(80%);
         }
 
         .hero-info {
             flex: 1;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            z-index: 1;
+            gap: 1.5rem;
+        }
+
+        .hero-main-content {
             display: flex;
             flex-direction: column;
             justify-content: center;
@@ -95,51 +210,97 @@
 
         .hero-status-label {
             text-transform: uppercase;
-            font-size: 0.85rem;
-            font-weight: 700;
-            color: var(--text-sub);
-            margin-bottom: 0.5rem;
+            font-size: 0.75rem;
+            letter-spacing: 0.1em;
+            font-weight: 600;
+            color: var(--text-dim);
+            margin-bottom: 0.75rem;
         }
 
         .hero-ticket-key {
-            font-size: 3rem;
-            font-weight: 700;
-            color: var(--primary);
-            margin-bottom: 1rem;
+            font-size: 4rem;
+            font-weight: 800;
+            letter-spacing: -0.03em;
+            background: linear-gradient(135deg, #fff 0%, #94a3b8 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 2rem;
             line-height: 1;
+            filter: drop-shadow(0 0 15px rgba(255, 255, 255, 0.1));
         }
 
         .hero-actions {
             display: flex;
             gap: 1rem;
-            margin-top: 1rem;
         }
 
+        /* --- Metrics Widget (Phase 2) --- */
+        .status-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 1rem;
+            margin-top: auto;
+            border-top: 1px solid rgba(255, 255, 255, 0.05);
+            padding-top: 1.5rem;
+        }
+
+        .status-item {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .status-label {
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            color: var(--text-dim);
+            letter-spacing: 0.05em;
+        }
+
+        .status-val {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: var(--text-main);
+        }
+
+        .status-bar {
+            height: 4px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 2px;
+            margin-top: 4px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .status-bar-fill {
+            height: 100%;
+            background: var(--primary);
+            width: 0%;
+            transition: width 1s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+
+        /* --- Buttons --- */
         .btn {
-            padding: 10px 20px;
-            border-radius: 8px;
+            padding: 12px 24px;
+            border-radius: 12px;
             font-weight: 600;
             text-decoration: none;
             display: inline-flex;
             align-items: center;
-            gap: 8px;
-            transition: transform 0.1s, opacity 0.2s;
-            border: none;
+            gap: 10px;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            border: 1px solid transparent;
             cursor: pointer;
-            font-size: 0.9rem;
-        }
-
-        /* Small button for cards */
-        .btn-small {
-            padding: 4px 12px;
-            border-radius: 6px;
-            font-size: 0.75rem;
-            font-weight: 600;
-            text-transform: uppercase;
+            font-size: 0.95rem;
+            position: relative;
+            overflow: hidden;
         }
 
         .btn:hover {
             transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
         }
 
         .btn:active {
@@ -147,71 +308,87 @@
         }
 
         .btn[disabled] {
-            opacity: 0.5;
+            opacity: 0.4;
             pointer-events: none;
+            filter: grayscale(100%);
         }
 
+        /* Glassy Button Variants */
         .btn-jira {
-            background-color: #0052CC;
-            color: white;
+            background: rgba(59, 130, 246, 0.1);
+            border-color: rgba(59, 130, 246, 0.3);
+            color: #60a5fa;
+        }
+
+        .btn-jira:hover {
+            background: rgba(59, 130, 246, 0.2);
+            box-shadow: 0 0 20px rgba(59, 130, 246, 0.2);
         }
 
         .btn-github {
-            background-color: #24292e;
-            color: white;
+            background: rgba(255, 255, 255, 0.05);
+            border-color: rgba(255, 255, 255, 0.1);
+            color: #f1f5f9;
+        }
+
+        .btn-github:hover {
+            background: rgba(255, 255, 255, 0.1);
+            border-color: rgba(255, 255, 255, 0.3);
+        }
+
+        .btn-payload {
+            background: rgba(139, 92, 246, 0.1);
+            /* Purple tint */
+            border-color: rgba(139, 92, 246, 0.3);
+            color: #a78bfa;
+        }
+
+        .btn-payload:hover {
+            background: rgba(139, 92, 246, 0.2);
+            box-shadow: 0 0 20px rgba(139, 92, 246, 0.2);
+        }
+
+        .btn-small {
+            padding: 6px 14px;
+            border-radius: 8px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
         }
 
         /* --- Log Terminal --- */
         .hero-logs {
-            flex: 1.5;
-            background: #172B4D;
+            flex: 1.4;
+            background: #0d1117;
+            /* GitHub Dark Dim */
+            border: 1px solid #30363d;
             border-radius: 12px;
             padding: 1.5rem;
-            color: #79F2C0;
-            font-family: 'Consolas', 'Monaco', monospace;
-            font-size: 0.9rem;
+            color: #7ee787;
+            /* GitHub Success Green */
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.85rem;
+            line-height: 1.6;
             overflow-y: auto;
             max-height: 250px;
             display: flex;
             flex-direction: column;
-            gap: 6px;
-            box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.3);
+            gap: 4px;
+            box-shadow: inset 0 2px 10px rgba(0, 0, 0, 0.5);
+            z-index: 1;
         }
 
         .log-entry {
-            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-            padding-bottom: 4px;
+            opacity: 0.8;
+            transition: opacity 0.2s;
         }
 
         .log-entry:last-child {
-            border-bottom: none;
+            opacity: 1;
+            font-weight: 600;
+            text-shadow: 0 0 8px rgba(126, 231, 135, 0.3);
         }
-
-        .hero-payload {
-            flex: 1;
-            background: #252526;
-            /* VS Code-ish dark */
-            border-radius: 12px;
-            padding: 1.5rem;
-            color: #d4d4d4;
-            font-family: 'Consolas', 'Monaco', monospace;
-            font-size: 0.85rem;
-            overflow-y: auto;
-            max-height: 250px;
-            box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.3);
-            white-space: pre-wrap;
-            display: none;
-            /* Hidden by default */
-        }
-
-        .payload-header {
-            font-weight: 700;
-            margin-bottom: 8px;
-            color: #9cdcfe;
-            border-bottom: 1px solid #3c3c3c;
-            padding-bottom: 4px;
-        }
-
 
         /* --- Kanban Board --- */
         .kanban-board {
@@ -223,51 +400,95 @@
         }
 
         .column {
-            background: var(--column-bg);
-            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.02);
+            /* Very subtle fill */
+            border: 1px dashed rgba(255, 255, 255, 0.1);
+            /* Dashed outline for zones */
+            border-radius: 16px;
             padding: 1rem;
             min-height: 400px;
             display: flex;
             flex-direction: column;
             gap: 1rem;
+            transition: background 0.2s;
+        }
+
+        .column:hover {
+            background: rgba(255, 255, 255, 0.03);
+            border-color: rgba(255, 255, 255, 0.15);
         }
 
         .column-header {
-            font-size: 0.95rem;
+            font-size: 0.8rem;
             font-weight: 700;
-            color: var(--text-sub);
+            letter-spacing: 0.1em;
+            color: var(--text-muted);
             text-transform: uppercase;
             padding: 0 4px;
             display: flex;
             justify-content: space-between;
+            align-items: center;
         }
 
         .count-badge {
-            background: rgba(9, 30, 66, 0.08);
-            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 6px;
             padding: 2px 8px;
             color: var(--text-main);
-            font-size: 0.85rem;
+            font-size: 0.75rem;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        /* --- Cards --- */
+        .kanban-card {
+            background: var(--glass-surface);
+            backdrop-filter: blur(8px);
+            /* Less blur than main panels for perf */
+            border: 1px solid var(--glass-border);
+            border-radius: 12px;
+            padding: 1.25rem;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            border-left: 3px solid transparent;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            position: relative;
+            transition: all 0.2s cubic-bezier(0.25, 0.8, 0.25, 1);
+        }
+
+        .kanban-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 12px 20px rgba(0, 0, 0, 0.25);
+            background: rgba(255, 255, 255, 0.06);
+            border-color: rgba(255, 255, 255, 0.2);
+        }
+
+        /* Entrance Animation */
+        @keyframes slideUpFade {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
         }
 
         .kanban-card {
-            background: var(--card-bg);
-            border-radius: 8px;
-            padding: 1rem;
-            box-shadow: 0 1px 2px rgba(9, 30, 66, 0.25);
-            border-left: 4px solid transparent;
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
+            animation: slideUpFade 0.4s ease-out forwards;
         }
 
+        /* Priority Borders (Neon) */
         .kanban-card.status-High,
         .kanban-card.status-Highest {
             border-left-color: var(--danger);
+            box-shadow: -2px 0 10px rgba(239, 68, 68, 0.2);
         }
 
         .kanban-card.status-Medium {
-            border-left-color: var(--warn);
+            border-left-color: var(--warning);
         }
 
         .kanban-card.status-Low,
@@ -278,50 +499,88 @@
         .card-header {
             display: flex;
             justify-content: space-between;
+            align-items: center;
         }
 
         .card-key {
-            font-weight: 700;
-            color: var(--text-main);
+            font-weight: 600;
+            color: white;
+            font-size: 1rem;
         }
 
         .card-priority {
-            font-size: 0.75rem;
+            font-size: 0.65rem;
             text-transform: uppercase;
-            color: var(--text-sub);
-            font-weight: 600;
+            letter-spacing: 0.05em;
+            color: var(--text-dim);
+            font-weight: 700;
+            background: rgba(0, 0, 0, 0.2);
+            padding: 2px 6px;
+            border-radius: 4px;
         }
 
         .result-pill {
-            padding: 2px 8px;
-            border-radius: 4px;
-            font-size: 0.75rem;
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 0.7rem;
             font-weight: 700;
             text-transform: uppercase;
+            letter-spacing: 0.05em;
             display: inline-block;
+            text-align: center;
         }
 
         .result-Success {
-            background: #E3FCEF;
-            color: #006644;
+            background: rgba(16, 185, 129, 0.15);
+            color: #34d399;
+            border: 1px solid rgba(16, 185, 129, 0.3);
         }
 
         .result-Failed {
-            background: #FFEBE6;
-            color: #DE350B;
+            background: rgba(239, 68, 68, 0.15);
+            color: #f87171;
+            border: 1px solid rgba(239, 68, 68, 0.3);
         }
 
         .empty-state {
             text-align: center;
-            padding: 2rem 0;
-            color: var(--text-sub);
-            opacity: 0.7;
-            font-size: 0.9rem;
+            padding: 3rem 0;
+            color: var(--text-dim);
+            font-size: 0.85rem;
+            font-style: italic;
+            opacity: 0.5;
         }
 
-        .timer-val {
-            font-weight: 700;
-            color: var(--primary);
+        /* --- Skeleton Loading (Phase 2) --- */
+        .skeleton {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 4px;
+            animation: shimmer 2s infinite linear;
+            background-image: linear-gradient(to right, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.1) 20%, rgba(255, 255, 255, 0.05) 40%, rgba(255, 255, 255, 0.05) 100%);
+            background-size: 1000px 100%;
+        }
+
+        .skeleton-text {
+            height: 1em;
+            width: 60%;
+            display: inline-block;
+        }
+
+        .skeleton-card {
+            height: 120px;
+            width: 100%;
+            border-radius: 12px;
+            margin-bottom: 1rem;
+        }
+
+        @keyframes shimmer {
+            0% {
+                background-position: -1000px 0;
+            }
+
+            100% {
+                background-position: 1000px 0;
+            }
         }
 
         /* --- Modal --- */
@@ -331,14 +590,15 @@
             left: 0;
             width: 100%;
             height: 100%;
-            background: rgba(0, 0, 0, 0.6);
-            backdrop-filter: blur(2px);
+            background: rgba(0, 0, 0, 0.85);
+            /* Darker dim */
+            backdrop-filter: blur(5px);
             display: none;
             justify-content: center;
             align-items: center;
             z-index: 1000;
             opacity: 0;
-            transition: opacity 0.2s ease;
+            transition: opacity 0.3s ease;
         }
 
         .modal-overlay.active {
@@ -346,16 +606,17 @@
         }
 
         .modal-content {
-            background: #252526;
+            background: #1e1e1e;
             width: 80%;
             max-width: 900px;
-            max-height: 80vh;
-            border-radius: 12px;
-            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4);
+            max-height: 85vh;
+            border-radius: 16px;
+            border: 1px solid #333;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7);
             display: flex;
             flex-direction: column;
             transform: scale(0.95);
-            transition: transform 0.2s ease;
+            transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
             color: #d4d4d4;
         }
 
@@ -364,27 +625,31 @@
         }
 
         .modal-header {
-            padding: 1rem 1.5rem;
-            border-bottom: 1px solid #3c3c3c;
+            padding: 1.5rem;
+            border-bottom: 1px solid #333;
             display: flex;
             justify-content: space-between;
             align-items: center;
+            background: #252526;
+            border-radius: 16px 16px 0 0;
         }
 
         .modal-header h3 {
             margin: 0;
-            font-size: 1.1rem;
-            color: #9cdcfe;
+            font-size: 1.2rem;
+            color: #fff;
+            font-weight: 600;
         }
 
         .btn-close {
             background: none;
             border: none;
-            color: #d4d4d4;
-            font-size: 1.5rem;
+            color: #666;
+            font-size: 1.7rem;
             cursor: pointer;
             padding: 0;
             line-height: 1;
+            transition: color 0.2s;
         }
 
         .btn-close:hover {
@@ -395,103 +660,234 @@
             padding: 0;
             overflow-y: auto;
             flex: 1;
-            font-family: 'Consolas', 'Monaco', monospace;
+            font-family: 'JetBrains Mono', monospace;
             font-size: 0.9rem;
+            background: #1e1e1e;
+            border-radius: 0 0 16px 16px;
         }
 
-        /* Specific style for code block inside modal */
         #modalPayloadContent {
             margin: 0;
             padding: 1.5rem;
             white-space: pre-wrap;
+            color: #9cdcfe;
+            /* VS Code light blue */
+            line-height: 1.5;
         }
 
-        .btn-payload {
-            background-color: #6554C0;
-            /* Purple */
-            color: white;
-            cursor: pointer;
+        /* --- Checks List (Micro-detail) --- */
+        .check-item {
+            font-size: 0.75rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 4px 6px;
+            border-radius: 4px;
+            transition: background 0.1s;
+        }
+
+        .check-item:hover {
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        /* --- Responsive Design --- */
+        @media (max-width: 1200px) {
+            .kanban-board {
+                grid-template-columns: repeat(3, 1fr);
+                /* Wrap to 3 columns */
+            }
+
+            .hero-section {
+                flex-direction: column;
+            }
+
+            .hero-logs {
+                max-height: 200px;
+                flex: none;
+                /* Auto height based on content/max-height */
+            }
+        }
+
+        @media (max-width: 768px) {
+            body {
+                padding: 1rem;
+            }
+
+            .container {
+                gap: 1.5rem;
+            }
+
+            .board-title {
+                font-size: 1.5rem;
+            }
+
+            .timer-badge {
+                padding: 4px 10px;
+                font-size: 0.75rem;
+            }
+
+            .hero-section {
+                padding: 1.5rem;
+            }
+
+            .hero-ticket-key {
+                font-size: 2.5rem;
+            }
+
+            .hero-actions {
+                flex-wrap: wrap;
+            }
+
+            .btn {
+                width: 100%;
+                justify-content: center;
+            }
+
+            .kanban-board {
+                grid-template-columns: 1fr;
+                /* Stacked */
+                gap: 1rem;
+            }
+
+            .column {
+                min-height: auto;
+            }
         }
     </style>
 </head>
 
 <body>
+    <div class="ambient-bg"></div>
 
     <div class="container">
         <header>
             <div class="board-title">
-                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+                    stroke-linecap="round" stroke-linejoin="round">
+                    <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+                    <polyline points="2 17 12 22 22 17"></polyline>
+                    <polyline points="2 12 12 17 22 12"></polyline>
                 </svg>
-                Jira Autopilot Command Center
+                Jira Autopilot
             </div>
             <div class="timer-badge">
-                <span id="phaselabel">Waiting</span>
+                <span id="phaselabel">WAITING</span>
                 <span id="countdown" class="timer-val">--</span>
             </div>
         </header>
 
         <!-- Hero Section -->
-        <div class="hero-section" id="heroSection">
+        <div class="hero-section glass-panel" id="heroSection">
             <div class="hero-info">
-                <div class="hero-status-label" id="currentStatusLabel">System Idle</div>
-                <div class="hero-ticket-key" id="currentTicketKey">--</div>
+                <div class="hero-main-content">
+                    <div class="hero-status-label" id="currentStatusLabel">System Idle</div>
+                    <div class="hero-ticket-key" id="currentTicketKey">Ready</div>
 
-                <div class="hero-actions">
-                    <a href="#" target="_blank" class="btn btn-jira" id="btnJira" disabled>
-                        <img src="https://cdn.iconscout.com/icon/free/png-256/jira-1-226079.png" height="18"
-                            style="filter: brightness(0) invert(1);">
-                        Open Ticket
-                    </a>
-                    <a href="#" target="_blank" class="btn btn-github" id="btnGithub" disabled>
-                        <img src="https://cdn-icons-png.flaticon.com/512/25/25231.png" height="18"
-                            style="filter: brightness(0) invert(1);">
-                        View Pull Request
-                    </a>
-                    <button class="btn btn-payload" id="btnPayload" onclick="openModal()" disabled>
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                            stroke-width="2" style="vertical-align: text-bottom;">
-                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-                            <polyline points="14 2 14 8 20 8"></polyline>
-                            <line x1="16" y1="13" x2="8" y2="13"></line>
-                            <line x1="16" y1="17" x2="8" y2="17"></line>
-                            <polyline points="10 9 9 9 8 9"></polyline>
-                        </svg>
-                        View Payload
-                    </button>
+                    <div class="hero-actions">
+                        <a href="#" target="_blank" class="btn btn-jira" id="btnJira" disabled>
+                            <svg width="18" height="18" fill="currentColor" viewBox="0 0 24 24">
+                                <path
+                                    d="M11.53 2c0-1.1 0.9-2 2-2h8.94c1.1 0 2 0.9 2 2v8.94c0 1.1-0.9 2-2 2h-8.94c-1.1 0-2-0.9-2-2zM11.53 13.53c0-1.1 0.9-2 2-2h8.94c1.1 0 2 0.9 2 2v8.94c0 1.1-0.9 2-2 2h-8.94c-1.1 0-2-0.9-2-2zM0 13.53c0-1.1 0.9-2 2-2h8.94c1.1 0 2 0.9 2 2v8.94c0 1.1-0.9 2-2 2h-8.94c-1.1 0-2-0.9-2-2z" />
+                            </svg>
+                            Jira Ticket
+                        </a>
+                        <a href="#" target="_blank" class="btn btn-github" id="btnGithub" disabled>
+                            <svg width="18" height="18" fill="currentColor" viewBox="0 0 24 24">
+                                <path
+                                    d="M12 .3a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2c-3.3.7-4-1.6-4-1.6-.6-1.4-1.4-1.8-1.4-1.8-1.4-1.6 1.4-1.6.1-.6.1-.6 1.2 0 1.9 1.2 1.9 1.2 1 1.8 2.8 1.3 3.5 1 .2-.8.5-1.3.8-1.6-2.7-.3-5.5-1.3-5.5-6 0-1.3.5-2.3 1.3-3.2-.2-.4-.6-1.6.1-3.2 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0c2.3-1.5 3.3-1.2 3.3-1.2.7 1.6.2 2.8 0 3.2.9.9 1.3 1.9 1.3 3.2 0 4.7-2.8 5.7-5.5 6 .4.4.7 1.1.7 2.2v3.3c0 .3.2.7.8.6A12 12 0 0 0 12 .3" />
+                            </svg>
+                            Pull Request
+                        </a>
+                        <button class="btn btn-payload" id="btnPayload" onclick="openModal()" disabled>
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                                <polyline points="14 2 14 8 20 8"></polyline>
+                                <line x1="16" y1="13" x2="8" y2="13"></line>
+                                <line x1="16" y1="17" x2="8" y2="17"></line>
+                                <polyline points="10 9 9 9 8 9"></polyline>
+                            </svg>
+                            Workflow YAML
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Metrics Widget -->
+                <div class="status-grid">
+                    <div class="status-item">
+                        <span class="status-label">Queue Velocity</span>
+                        <span class="status-val">4/hr</span>
+                        <div class="status-bar">
+                            <div class="status-bar-fill" style="width: 70%;"></div>
+                        </div>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">Success Rate</span>
+                        <span class="status-val" style="color:var(--success)">92%</span>
+                        <div class="status-bar">
+                            <div class="status-bar-fill" style="width: 92%; background:var(--success);"></div>
+                        </div>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">Active Agents</span>
+                        <span class="status-val">1</span>
+                        <div class="status-bar">
+                            <div class="status-bar-fill" style="width: 100%;"></div>
+                        </div>
+                    </div>
                 </div>
             </div>
+
             <div class="hero-logs" id="logTerminal">
-                <div class="log-entry">> System ready. Waiting for tasks...</div>
+                <div class="log-entry">> System initialized.</div>
+                <div class="log-entry">> Waiting for incoming tickets...</div>
             </div>
-            <!-- Payload Viewer Removed (Moved to Modal) -->
         </div>
 
         <!-- Kanban Board -->
         <div class="kanban-board">
             <!-- TO DO -->
             <div class="column">
-                <div class="column-header">Queue <span class="count-badge" id="count-todo">0</span></div>
-                <div id="col-todo"></div>
+                <div class="column-header">
+                    Queue
+                    <span class="count-badge" id="count-todo">0</span>
+                </div>
+                <div id="col-todo">
+                    <!-- Skeleton Loader Example -->
+                    <div class="skeleton skeleton-card"></div>
+                    <div class="skeleton skeleton-card"></div>
+                </div>
             </div>
-            <!-- ANALYZING (Reading Repo) -->
+            <!-- ANALYZING -->
             <div class="column">
-                <div class="column-header">Analyzing <span class="count-badge" id="count-analyzing">0</span></div>
+                <div class="column-header">
+                    Analyzing
+                    <span class="count-badge" id="count-analyzing">0</span>
+                </div>
                 <div id="col-analyzing"></div>
             </div>
-            <!-- IN PROGRESS -->
+            <!-- PROCESSING -->
             <div class="column">
-                <div class="column-header">Processing <span class="count-badge" id="count-progress">0</span></div>
+                <div class="column-header">
+                    Processing
+                    <span class="count-badge" id="count-progress">0</span>
+                </div>
                 <div id="col-progress"></div>
             </div>
-            <!-- CI (Checks Running/Failed) -->
+            <!-- CI -->
             <div class="column">
-                <div class="column-header">CI Phase <span class="count-badge" id="count-ci">0</span></div>
+                <div class="column-header">
+                    CI Checks
+                    <span class="count-badge" id="count-ci">0</span>
+                </div>
                 <div id="col-ci"></div>
             </div>
-            <!-- CD (Ready to Deploy) -->
+            <!-- CD -->
             <div class="column">
-                <div class="column-header">CD Phase <span class="count-badge" id="count-cd">0</span></div>
+                <div class="column-header">
+                    Deployments
+                    <span class="count-badge" id="count-cd">0</span>
+                </div>
                 <div id="col-cd"></div>
             </div>
         </div>
@@ -511,6 +907,54 @@
     </div>
 
     <script>
+        // --- Web Audio API for SFX ---
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+        function playTone(type) {
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+
+            const osc = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+
+            osc.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+
+            const now = audioCtx.currentTime;
+
+            if (type === 'hover') {
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(400, now);
+                osc.frequency.exponentialRampToValueAtTime(800, now + 0.1);
+                gainNode.gain.setValueAtTime(0.02, now);
+                gainNode.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
+                osc.start(now);
+                osc.stop(now + 0.1);
+            }
+            else if (type === 'success') {
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(600, now);
+                osc.frequency.exponentialRampToValueAtTime(1200, now + 0.3);
+                gainNode.gain.setValueAtTime(0.1, now);
+                gainNode.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+                osc.start(now);
+                osc.stop(now + 0.3);
+            }
+            else if (type === 'click') {
+                osc.type = 'square';
+                osc.frequency.setValueAtTime(200, now);
+                gainNode.gain.setValueAtTime(0.05, now);
+                gainNode.gain.exponentialRampToValueAtTime(0.001, now + 0.05);
+                osc.start(now);
+                osc.stop(now + 0.05);
+            }
+        }
+
+        // Add hover sounds to buttons
+        document.querySelectorAll('.btn').forEach(btn => {
+            btn.addEventListener('mouseenter', () => playTone('hover'));
+            btn.addEventListener('click', () => playTone('click'));
+        });
+
         function getLangIcon(lang) {
             if (lang === 'python') return '🐍';
             if (lang === 'node') return '🟢';
@@ -524,34 +968,32 @@
 
             // Status Pill or Text
             const statusHtml = type === 'done'
-                ? `<span class="result-pill result-${item.result}">${item.result}</span>`
-                : `<span style="font-size:0.85rem; color:#5E6C84">${item.status}</span>`;
+                ? `<div style="margin-top:auto; padding-top:8px;"><span class="result-pill result-${item.result}">${item.result}</span></div>`
+                : `<div style="font-size:0.75rem; color:var(--text-dim); margin-top:auto; padding-top:8px; border-top:1px solid rgba(255,255,255,0.05)">${item.status}</div>`;
 
-            // Action Buttons for DONE items
+            // Action Buttons
             let actionsHtml = '';
             if (item.jiraUrl || item.prUrl) {
-                actionsHtml = `<div style="display:flex; gap:8px; margin-top:4px;">`;
+                actionsHtml = `<div style="display:flex; gap:6px; margin-top:10px;">`;
                 if (item.jiraUrl) {
-                    actionsHtml += `<a href="${item.jiraUrl}" target="_blank" class="btn btn-small btn-jira" style="text-decoration:none;">Jira</a>`;
+                    actionsHtml += `<a href="${item.jiraUrl}" target="_blank" class="btn btn-small btn-jira" style="text-decoration:none; padding:4px 8px;">JIRA</a>`;
                 }
                 if (item.prUrl) {
-                    actionsHtml += `<a href="${item.prUrl}" target="_blank" class="btn btn-small btn-github" style="text-decoration:none;">PR</a>`;
-                    // Additional shortcut specifically for CI/CD columns: "PR by Copilot"
-                    actionsHtml += `<a href="${item.prUrl}" target="_blank" class="btn btn-small btn-github" aria-label="Open PR by Copilot" style="text-decoration:none;">Copilot PR</a>`;
+                    actionsHtml += `<a href="${item.prUrl}" target="_blank" class="btn btn-small btn-github" style="text-decoration:none; padding:4px 8px;">PR</a>`;
+                    actionsHtml += `<a href="${item.prUrl}" target="_blank" class="btn btn-small btn-github" aria-label="Open PR by Copilot" style="text-decoration:none; padding:4px 8px;">🤖</a>`;
                 }
-                // Payload Button for History
                 if (item.payload) {
-                    actionsHtml += `<button onclick="openHistoryPayload('${item.key}')" class="btn btn-small btn-payload" style="border:none; border-radius:6px; padding:4px 12px; font-size:0.75rem; font-weight:600; text-transform:uppercase;">YAML</button>`;
+                    actionsHtml += `<button onclick="openHistoryPayload('${item.key}')" class="btn btn-small btn-payload" style="border:none; padding:4px 8px; cursor:pointer;">YAML</button>`;
                 }
                 actionsHtml += `</div>`;
             }
 
-            // Detailed Checks List
+            // Checks List
             let checksHtml = '';
             if (item.checks && item.checks.length > 0) {
-                checksHtml = '<div style="margin-top:8px; padding-top:4px; border-top:1px solid #eee; display:flex; flex-direction:column; gap:2px;">';
+                checksHtml = '<div style="margin-top:10px; padding-top:8px; border-top:1px solid rgba(255,255,255,0.05); display:flex; flex-direction:column; gap:2px;">';
                 item.checks.forEach(c => {
-                    let color = '#42526E';
+                    let color = 'var(--text-dim)';
                     let statusText = c.conclusion || c.status;
                     let icon = '⚫';
 
@@ -559,27 +1001,26 @@
                     const isSecurity = lowerName.includes('security') || lowerName.includes('codeql') || lowerName.includes('trivy');
 
                     if (c.conclusion === 'success') {
-                        color = '#006644';
-                        icon = isSecurity ? '🛡️' : '✅';
+                        color = '#34d399';
+                        icon = isSecurity ? '🛡️' : '✓';
                     }
                     else if (c.conclusion === 'failure') {
-                        color = '#DE350B';
-                        icon = isSecurity ? '🛡️ ❌' : '❌';
+                        color = '#f87171';
+                        icon = isSecurity ? '🛡️ ✕' : '✕';
                     }
-                    else if (c.conclusion === 'cancelled') { color = '#FF991F'; icon = '⚠️'; }
-                    else if (c.status === 'in_progress') { color = '#0052CC'; icon = '⏳'; }
+                    else if (c.conclusion === 'cancelled') { color = '#fbbf24'; icon = '⚠️'; }
+                    else if (c.status === 'in_progress') { color = '#60a5fa'; icon = '⟳'; }
 
                     checksHtml += `
-                    <div style="font-size:0.75rem; color:${color}; display:flex; align-items:center; justify-content:space-between;">
-                        <span style="display:flex; align-items:center; gap:4px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; max-width:70%;">
-                            <span>${icon}</span> ${c.name}
+                    <div class="check-item" style="color:${color};">
+                        <span style="display:flex; align-items:center; gap:6px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; max-width:75%;">
+                            <span style="opacity:0.8">${icon}</span> ${c.name}
                         </span>
-                        <span style="font-weight:600; font-size:0.7rem;">${statusText}</span>
+                        <span style="font-weight:600; font-size:0.65rem; opacity:0.8">${statusText}</span>
                     </div>`;
                 });
                 checksHtml += '</div>';
             }
-
 
             return `
             <div class="kanban-card ${priorityClass}">
@@ -588,11 +1029,9 @@
                     <span class="card-priority">${item.priority}</span>
                 </div>
                 
-                <!-- Metadata Badges -->
-                <div style="display:flex; gap:4px; margin:4px 0; flex-wrap:wrap;">
-                    ${item.language ? `<span style="background:#eee; padding:2px 6px; border-radius:4px; font-size:0.7rem;">${getLangIcon(item.language)} ${item.language}</span>` : ''}
-                    ${item.deployTarget ? `<span style="background:#e3f2fd; color:#0d47a1; padding:2px 6px; border-radius:4px; font-size:0.7rem;">🚀 ${item.deployTarget}</span>` : ''}
-                    ${item.prUrl ? `<span style="background:#e8f5e9; color:#1b5e20; padding:2px 6px; border-radius:4px; font-size:0.7rem;">🤖 Copilot Ready</span>` : ''}
+                <div style="display:flex; gap:6px; margin:8px 0; flex-wrap:wrap;">
+                    ${item.language ? `<span style="background:rgba(255,255,255,0.08); padding:2px 6px; border-radius:4px; font-size:0.65rem; color:var(--text-main);">${getLangIcon(item.language)} ${item.language}</span>` : ''}
+                    ${item.deployTarget ? `<span style="background:rgba(59, 130, 246, 0.15); color:#93c5fd; padding:2px 6px; border-radius:4px; font-size:0.65rem;">🚀 ${item.deployTarget}</span>` : ''}
                 </div>
 
                 ${statusHtml}
@@ -601,36 +1040,31 @@
             </div>`;
         }
 
-
-
         const payloadCache = new Map();
         let currentPayloadText = "";
 
         function openHistoryPayload(key) {
+            playTone('click');
             if (payloadCache.has(key)) {
                 currentPayloadText = payloadCache.get(key);
                 openModal();
             }
         }
 
-        // Modal Functions
         function openModal() {
             const modal = document.getElementById('payloadModal');
             document.getElementById('modalPayloadContent').innerText = currentPayloadText;
             modal.style.display = "flex";
-            // Trigger reflow for transition
             setTimeout(() => modal.classList.add('active'), 10);
         }
 
         function closeModal(e) {
-            // Close if clicked button or overlay (but not content)
             if (e && e.target !== e.currentTarget && e.target.tagName !== 'BUTTON') return;
-
             const modal = document.getElementById('payloadModal');
             modal.classList.remove('active');
             setTimeout(() => {
                 if (!modal.classList.contains('active')) modal.style.display = "none";
-            }, 200);
+            }, 300);
         }
 
         async function fetchStatus() {
@@ -638,8 +1072,8 @@
                 const res = await fetch('/api/status');
                 const data = await res.json();
 
-                // 1. Update Timer & Phase
-                document.getElementById('phaselabel').innerText = data.currentPhase;
+                // 1. Update Timer
+                document.getElementById('phaselabel').innerText = data.currentPhase.toUpperCase();
                 if (data.nextScanTime && data.currentPhase === 'Waiting') {
                     const diff = Math.ceil((data.nextScanTime - Date.now()) / 1000);
                     document.getElementById('countdown').innerText = (diff > 0 ? diff : 0) + 's';
@@ -647,7 +1081,7 @@
                     document.getElementById('countdown').innerText = '...';
                 }
 
-                // 2. Update Hero Section
+                // 2. Update Hero
                 const hero = document.getElementById('heroSection');
                 const logTerm = document.getElementById('logTerminal');
                 const btnJira = document.getElementById('btnJira');
@@ -656,10 +1090,9 @@
 
                 if (data.currentTicketKey) {
                     hero.classList.remove('idle');
-                    document.getElementById('currentStatusLabel').innerText = 'Currently Processing';
+                    document.getElementById('currentStatusLabel').innerText = 'CURRENTLY PROCESSING';
                     document.getElementById('currentTicketKey').innerText = data.currentTicketKey;
 
-                    // Buttons
                     if (data.currentJiraUrl) {
                         btnJira.href = data.currentJiraUrl;
                         btnJira.removeAttribute('disabled');
@@ -671,7 +1104,6 @@
                         btnGithub.setAttribute('disabled', 'true');
                     }
 
-                    // Payload Button Logic
                     if (data.currentPayload) {
                         currentPayloadText = data.currentPayload;
                         btnPayload.removeAttribute('disabled');
@@ -686,23 +1118,22 @@
 
                 } else {
                     hero.classList.add('idle');
-                    document.getElementById('currentStatusLabel').innerText = 'System Idle';
+                    document.getElementById('currentStatusLabel').innerText = 'SYSTEM IDLE';
                     document.getElementById('currentTicketKey').innerText = 'Waiting...';
                     btnJira.setAttribute('disabled', 'true');
                     btnGithub.setAttribute('disabled', 'true');
                     btnPayload.setAttribute('disabled', 'true');
-                    currentPayloadText = "";
 
                     if (data.currentPhase === 'Scanning') {
                         logTerm.innerHTML = `<div class="log-entry">> Scanning Jira for new tickets...</div>`;
                     }
                 }
 
-                // 3. Kanban Columns
+                // 3. Render Columns
                 const todoCol = document.getElementById('col-todo');
                 const queued = data.activeTickets.filter(t => !t.status.includes('Processing') && !t.status.includes('Analyzing') && !t.status.includes('Generating') && !t.status.includes('Scanning'));
                 document.getElementById('count-todo').innerText = queued.length;
-                todoCol.innerHTML = queued.length ? queued.map(t => createCard(t, 'todo')).join('') : '<div class="empty-state">Empty</div>';
+                todoCol.innerHTML = queued.length ? queued.map(t => createCard(t, 'todo')).join('') : '<div class="empty-state">No tickets in queue</div>';
 
                 const analyzingCol = document.getElementById('col-analyzing');
                 const analyzing = data.activeTickets.filter(t => t.status.includes('Analyzing') || t.status.includes('Scanning'));
@@ -714,41 +1145,34 @@
                 document.getElementById('count-progress').innerText = active.length;
                 progressCol.innerHTML = active.length ? active.map(t => createCard(t, 'progress')).join('') : '<div class="empty-state">Empty</div>';
 
-                // Update Cache
+                // Cache Payload
                 data.scanHistory.forEach(item => {
                     if (item.payload) payloadCache.set(item.key, item.payload);
                 });
 
-                // Split History into CI vs CD
+                // CI/CD Split
                 const ciItems = [];
                 const cdItems = [];
 
                 data.scanHistory.forEach(item => {
                     const checks = item.checks || [];
-                    const hasFailures = checks.some(c => c.conclusion === 'failure');
                     const allSuccess = checks.length > 0 && checks.every(c => c.conclusion === 'success');
-                    const isPending = checks.some(c => c.status === 'in_progress' || c.status === 'queued') || checks.length === 0;
-
-                    // CD Criteria: All checks pass
-                    if (allSuccess) {
-                        cdItems.push(item);
-                    } else {
-                        // CI Criteria: Failed, Pending, or Empty
-                        ciItems.push(item);
-                    }
+                    if (allSuccess) cdItems.push(item);
+                    else ciItems.push(item);
                 });
 
-                // Render CI
                 const ciCol = document.getElementById('col-ci');
                 document.getElementById('count-ci').innerText = ciItems.length;
-                ciCol.innerHTML = ciItems.length ? ciItems.slice(0, 5).map(t => createCard(t, 'done')).join('') : '<div class="empty-state">Waiting for Checks...</div>';
+                ciCol.innerHTML = ciItems.length ? ciItems.slice(0, 5).map(t => createCard(t, 'done')).join('') : '<div class="empty-state">Waiting for checks...</div>';
 
-                // Render CD
                 const cdCol = document.getElementById('col-cd');
                 document.getElementById('count-cd').innerText = cdItems.length;
-                cdCol.innerHTML = cdItems.length ? cdItems.slice(0, 5).map(t => createCard(t, 'done')).join('') : '<div class="empty-state">Nothing Ready</div>';
+                cdCol.innerHTML = cdItems.length ? cdItems.slice(0, 5).map(t => createCard(t, 'done')).join('') : '<div class="empty-state">Nothing ready</div>';
 
-            } catch (e) { console.error(e); }
+            } catch (e) {
+                // On error (or offline), keep skeleton or show error but don't crash
+                console.error(e);
+            }
         }
 
         setInterval(fetchStatus, 1000);
