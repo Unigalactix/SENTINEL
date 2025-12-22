@@ -128,7 +128,80 @@ Add this to your Claude Desktop config to give your AI access to the agent's too
 
 ## Architecture
 
-See [agents.md](./agents.md) for detailed agent specifications and workflow diagrams.
+See [agents.md](./agents.md) for detailed agent specifications.
+
+### Workflow Diagram
+
+```mermaid
+graph TD
+    %% Define Styles
+    classDef jira fill:#2684FF,stroke:#0052CC,stroke-width:2px,color:#fff;
+    classDef auto fill:#FFD700,stroke:#B8860B,stroke-width:2px,color:#000;
+    classDef gh fill:#24292e,stroke:#000,stroke-width:2px,color:#fff;
+    classDef fail fill:#FF5630,stroke:#BF2600,stroke-width:2px,color:#fff;
+    classDef success fill:#36B37E,stroke:#006644,stroke-width:2px,color:#fff;
+
+    %% User Start
+    Start(["👤 User Creates Ticket"])
+    style Start fill:#fff,stroke:#333,stroke-width:2px
+
+    %% Subgraph: Jira
+    subgraph JIRA ["🟦 JIRA (Project Management)"]
+        direction TB
+        TicketState["📋 Ticket: To Do"]
+        Comment["💬 Comment: 'Finished!'"]
+        MoveDone(["✅ Move to Done"])
+        HumanAlert["⚠️ Alert Human"]
+    end
+    class TicketState,Comment,MoveDone jira
+    class HumanAlert fail
+
+    %% Subgraph: Autopilot
+    subgraph BOT ["🤖 Autopilot (Orchestrator)"]
+        direction TB
+        Scan["👀 Scan & Detect"]
+        Analyze["🧠 Analyze & Prompt"]
+    end
+    class Scan,Analyze auto
+
+    %% Subgraph: GitHub
+    subgraph GITHUB ["🐙 GitHub (Code Repository)"]
+        direction TB
+        Copilot["✨ Copilot: Write Code"]
+        CreatePR["📝 Create PR (Draft)"]
+        TestRun{"🧪 Run Logic"}
+        Decision{"❓ Logic Check"}
+        
+        %% Actions
+        ActionUndraft["🔓 Action: Undraft"]
+        ActionApprove["👍 Action: Approve"]
+        MergePR["🔀 Merge PR"]
+    end
+    class Copilot,CreatePR,MergePR,ActionUndraft,ActionApprove gh
+    class TestRun,Decision gh
+
+    %% Flow Connections
+    Start --> TicketState
+    TicketState -->|"Polling"| Scan
+    Scan -->|"New Item Found"| Analyze
+    Analyze -->|"Generate Code"| Copilot
+    
+    Copilot -->|"Commit & Push"| CreatePR
+    CreatePR --> TestRun
+    
+    %% Logic Paths
+    TestRun -->|"❌ Tests Failed"| HumanAlert
+    TestRun -->|"✅ Tests Passed"| Decision
+    
+    Decision -->|"Is Draft?"| ActionUndraft
+    Decision -->|"Is Ready?"| ActionApprove
+    
+    ActionUndraft --> MergePR
+    ActionApprove --> MergePR
+    
+    MergePR -->|"Webhook"| Comment
+    Comment --> MoveDone
+```
 
 ## License
 
