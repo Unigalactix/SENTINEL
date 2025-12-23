@@ -189,7 +189,16 @@ graph TD
     Start --> TicketState
     TicketState -->|"Polling"| Scan
     Scan -->|"New Item Found"| Analyze
-    Analyze -->|"Generate Code"| Copilot
+    
+    %% New Decision Logic
+    Analyze --> CheckExist{Workflow Exists?}
+    CheckExist -->|No| Copilot
+    CheckExist -->|Yes| CheckIntact{Is Intact?}
+    
+    CheckIntact -->|No / Needs Fix| Copilot
+    CheckIntact -->|Yes / Verified| VerifySkip["✅ Verify & Skip"]
+    
+    VerifySkip -.-> MoveDone
     
     Copilot -->|"Commit & Push"| CreatePR
     CreatePR --> TestRun
