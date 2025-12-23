@@ -142,6 +142,15 @@ app.post('/api/inspector', (req, res) => {
 
 
 
+// --- Helper: Log Progress ---
+function logProgress(message) {
+    const timestamp = new Date().toLocaleTimeString();
+    const logEntry = `[${timestamp}] ${message} `;
+    console.log(logEntry);
+    systemStatus.currentTicketLogs.push(logEntry);
+    writeLog(message);
+}
+
 // --- Core Logic ---
 async function processTicketData(issue) {
     if (!issue || !issue.fields) return;
