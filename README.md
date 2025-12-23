@@ -4,12 +4,6 @@ A comprehensive Node.js automation service that bridges Jira and GitHub. It acts
 
 ![alt text](image.png)
 
-## Prerequisites
-
--   **Node.js** (v18 or higher)
--   **Jira Account** (Cloud) with an API Token.
--   **GitHub Account** with a Personal Access Token (Classic) having `repo`, `workflow`, and `read:user` scopes.
-
 ## Features ✨
 
 -   **Autopilot Polling**: Automatically polls Jira every 30 seconds for new tickets.
@@ -225,10 +219,6 @@ graph TD
     Comment --> MoveDone
 ```
 
-## License
-
-MIT
-
 ## Configuration: Per-board Post-PR Status
 
 You can configure a per-board (project) status that the service will transition Jira tickets to after a PR is created or verified. The precedence is:
@@ -251,3 +241,6 @@ Notes:
 - The service will only transition a ticket to `Done` when deployment is detected by the CI checks.
 - If no mapping is found for a project, the `POST_PR_STATUS` env var will be used; otherwise `In Progress` is used.
 
+## License
+
+MIT
