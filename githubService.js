@@ -173,9 +173,9 @@ function generateWorkflowFile({ language, repoName, buildCommand, testCommand, d
     }
 
     // --- Azure Deployment Job ---
-        let deployJob = '';
-        if (deployTarget === 'azure-webapp') {
-                deployJob = `
+    let deployJob = '';
+    if (deployTarget === 'azure-webapp') {
+        deployJob = `
     deploy:
         runs-on: ubuntu-latest
         needs: [build, security-scan] # Can also depend on docker-build if we were deploying the container
@@ -190,7 +190,7 @@ function generateWorkflowFile({ language, repoName, buildCommand, testCommand, d
                     publish-profile: \${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
                     package: .
                     slot-name: \${{ secrets.AZURE_WEBAPP_SLOT_NAME }}`;
-        }
+    }
 
     const yamlContent = `
     name: CI Pipeline - ${repoName}

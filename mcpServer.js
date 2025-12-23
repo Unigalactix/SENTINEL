@@ -170,6 +170,86 @@ server.tool(
     }
 );
 
+// 7. Get Jira Details
+server.tool(
+    "get_jira_details",
+    "Read the full details of a specific Jira ticket.",
+    {
+        issueKey: z.string().describe("The Jira Issue Key (e.g., NDE-123)")
+    },
+    async ({ issueKey }) => {
+        const { getIssueDetails } = require('./jiraService');
+        const details = await getIssueDetails(issueKey);
+        return {
+            content: [{ type: "text", text: JSON.stringify(details, null, 2) }]
+        };
+    }
+);
+
+// 8. Read Server Logs
+server.tool(
+    "read_server_logs",
+    "Read the last N lines of the server log file.",
+    {
+        lines: z.number().optional().describe("Number of lines to read (default: 50)")
+    },
+    async ({ lines = 50 }) => {
+        const fs = require('fs');
+        const path = require('path');
+        const logPath = path.join(__dirname, 'logs', 'server.log');
+
+        try {
+            if (!fs.existsSync(logPath)) {
+                return { content: [{ type: "text", text: "Log file not found." }] };
+            }
+            const content = fs.readFileSync(logPath, 'utf8');
+            const allLines = content.split('\n');
+            const lastLines = allLines.slice(-lines).join('\n');
+            return {
+                content: [{ type: "text", text: lastLines }]
+            };
+        } catch (e) {
+            return { isError: true, content: [{ type: "text", text: `Error reading log: ${e.message}` }] };
+        }
+    }
+);
+
+// 9. Trigger Manual Poll
+server.tool(
+    "trigger_manual_poll",
+    "Force the Autopilot to check Jira for new tickets immediately.",
+    {},
+    async () => {
+        try {
+            const response = await fetch(`${API_BASE}/poll`, { method: 'POST' });
+            const data = await response.json();
+            return {
+                content: [{ type: "text", text: `Poll Triggered: ${data.message}` }]
+            };
+        } catch (e) {
+            return { isError: true, content: [{ type: "text", text: `Failed to trigger poll: ${e.message}` }] };
+        }
+    }
+);
+
+// 10. List Active Repos / Projects
+server.tool(
+    "list_active_repos",
+    "List all Jira projects currently being monitored by the Autopilot.",
+    {},
+    async () => {
+        try {
+            const response = await fetch(`${API_BASE}/projects`);
+            const data = await response.json();
+            return {
+                content: [{ type: "text", text: `Monitored Projects: ${data.projects.join(', ')}` }]
+            };
+        } catch (e) {
+            return { isError: true, content: [{ type: "text", text: `Failed to list projects: ${e.message}` }] };
+        }
+    }
+);
+
 // Start the server transport
 async function main() {
     const transport = new StdioServerTransport();

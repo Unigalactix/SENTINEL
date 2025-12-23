@@ -52,13 +52,47 @@ async function jiraRequest(path, method = 'GET', body = null) {
     });
 }
 
+// Cache for dynamic project keys to avoid fetching on every poll
+let cachedProjectKeys = null;
+let lastProjectFetch = 0;
+const PROJECT_CACHE_TTL = 1000 * 60 * 60; // Refresh project list every hour
+
+async function getAllProjectKeys() {
+    // Return cached keys if valid
+    if (cachedProjectKeys && (Date.now() - lastProjectFetch < PROJECT_CACHE_TTL)) {
+        return cachedProjectKeys;
+    }
+
+    try {
+        console.log('[Jira Service] Fetching all available projects...');
+        const result = await jiraRequest('/rest/api/3/project');
+        if (Array.isArray(result)) {
+            const keys = result.map(p => p.key);
+            console.log(`[Jira Service] Discovered ${keys.length} projects: ${keys.join(', ')}`);
+            cachedProjectKeys = keys.join(',');
+            lastProjectFetch = Date.now();
+            return cachedProjectKeys;
+        }
+        return '';
+    } catch (error) {
+        console.error('[Jira Service] Failed to fetch projects:', error.message);
+        return 'NDE'; // Safe fallback
+    }
+}
+
 /**
  * Fetch pending tickets (Status = 'To Do')
- * Uses standard POST search API to avoid deprecation/URL limit issues.
  */
 async function getPendingTickets() {
+    // Use ENV if available, otherwise fetch dynamically
+    let projectKeys = process.env.JIRA_PROJECT_KEY;
+
+    if (!projectKeys) {
+        projectKeys = await getAllProjectKeys();
+    }
+
     // JQL: Broad scope for any 'New'/'To Do' items
-    const jql = `project IN (${JIRA_PROJECT_KEYS}) AND statusCategory = "To Do" ORDER BY priority DESC`;
+    const jql = `project IN (${projectKeys}) AND statusCategory = "To Do" ORDER BY priority DESC`;
 
     try {
         const result = await jiraRequest('/rest/api/3/search/jql', 'POST', {
@@ -145,4 +179,24 @@ async function addComment(issueKey, body) {
     }
 }
 
-module.exports = { getPendingTickets, transitionIssue, addComment };
+/**
+ * Fetch full details of a single issue
+ */
+async function getIssueDetails(issueKey) {
+    try {
+        console.log(`[Jira Service] Fetching details for ${issueKey}...`);
+        const result = await jiraRequest(`/rest/api/3/issue/${issueKey}`);
+        return result;
+    } catch (error) {
+        console.error(`[Jira Service] Error fetching issue ${issueKey}:`, error.message);
+        throw error;
+    }
+}
+
+module.exports = {
+    getPendingTickets,
+    transitionIssue,
+    addComment,
+    getAllProjectKeys,
+    getIssueDetails
+};

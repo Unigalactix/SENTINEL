@@ -2,10 +2,23 @@
 
 A comprehensive Node.js automation service that bridges Jira and GitHub. It acts as an autonomous agent that polls Jira for tickets, intelligently detects project requirements (Language, Repo), and generates remote CI/CD workflows via GitHub Pull Requests.
 
+![alt text](image.png)
+
+## Prerequisites
+
+-   **Node.js** (v18 or higher)
+-   **Jira Account** (Cloud) with an API Token.
+-   **GitHub Account** with a Personal Access Token (Classic) having `repo`, `workflow`, and `read:user` scopes.
+
 ## Features ✨
 
 -   **Autopilot Polling**: Automatically polls Jira every 30 seconds for new tickets.
--   **Smart Language Detection**: Automatically parses repository files to detect the tech stack:
+-   **Dynamic Project Discovery**: Automatically detects all available Jira projects (no need to hardcode keys).
+-   **AI-Powered agent (Optional)**: Enable `USE_GH_COPILOT=true` to unlock:
+    -   **AI Code Fixes**: Automatically applies code fixes tailored to Jira requirements before PR.
+    -   **AI Workflow Generation**: Generates custom CI/CD pipelines instead of static templates.
+    -   **Sub-PR Management**: Detects, un-drafts, and auto-merges Pull Requests created by `@copilot`.
+-   **Smart Language Detection**: Automatically parsing repository files to detect the tech stack:
     -   `package.json` → **Node.js**
     -   `*.csproj` / `*.sln` → **.NET**
     -   `requirements.txt` → **Python**
@@ -184,7 +197,16 @@ graph TD
     Start --> TicketState
     TicketState -->|"Polling"| Scan
     Scan -->|"New Item Found"| Analyze
-    Analyze -->|"Generate Code"| Copilot
+    
+    %% New Decision Logic
+    Analyze --> CheckExist{Workflow Exists?}
+    CheckExist -->|No| Copilot
+    CheckExist -->|Yes| CheckIntact{Is Intact?}
+    
+    CheckIntact -->|No / Needs Fix| Copilot
+    CheckIntact -->|Yes / Verified| VerifySkip["✅ Verify & Skip"]
+    
+    VerifySkip -.-> MoveDone
     
     Copilot -->|"Commit & Push"| CreatePR
     CreatePR --> TestRun
@@ -206,3 +228,26 @@ graph TD
 ## License
 
 MIT
+
+## Configuration: Per-board Post-PR Status
+
+You can configure a per-board (project) status that the service will transition Jira tickets to after a PR is created or verified. The precedence is:
+
+- `config/board_post_pr_status.json` mapping (project key or project name)
+- `POST_PR_STATUS` environment variable
+- default: `In Progress`
+
+Create `config/board_post_pr_status.json` with a JSON object mapping project keys (e.g. `NDE`) or project names to the desired status. Example:
+
+```
+{
+    "NDE": "In Review",
+    "MKT": "In Development",
+    "OPS": "In Progress"
+}
+```
+
+Notes:
+- The service will only transition a ticket to `Done` when deployment is detected by the CI checks.
+- If no mapping is found for a project, the `POST_PR_STATUS` env var will be used; otherwise `In Progress` is used.
+
