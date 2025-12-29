@@ -441,10 +441,10 @@ jobs:
     - name: Deploy to Azure Web App
       uses: azure/webapps-deploy@v2
       with:
-        app-name: 'democicd111'
+        app-name: '\${{ secrets.AZURE_WEBAPP_APP_NAME }}'
         publish-profile: \${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
                     package: .
-                    slot-name: production
+                    slot-name: \${{ secrets.AZURE_WEBAPP_SLOT_NAME }}
 \`\`\`
 `;
 }
