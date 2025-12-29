@@ -51,7 +51,7 @@ server.tool(
     "generate_workflow_yaml",
     "Generates a GitHub Actions CI pipeline YAML for a given language.",
     {
-        language: z.enum(['node', 'python', 'dotnet']).describe("Language of the project"),
+        language: z.enum(['node', 'python', 'dotnet', 'java']).describe("Language of the project"),
         repoName: z.string().describe("Full repository name (owner/repo)"),
         buildCommand: z.string().optional().describe("Custom build command"),
         testCommand: z.string().optional().describe("Custom test command"),
@@ -132,14 +132,14 @@ server.tool(
     async ({ repoName, pullNumber }) => {
         const { markPullRequestReadyForReview } = require('./githubService');
         const result = await markPullRequestReadyForReview({ repoName, pullNumber });
-        if (result.success) {
+        if (result.ok) {
             return {
                 content: [{ type: "text", text: `Successfully marked PR #${pullNumber} as Ready for Review.` }]
             };
         } else {
             return {
                 isError: true,
-                content: [{ type: "text", text: `Failed to undraft PR: ${result.error}` }]
+                content: [{ type: "text", text: `Failed to undraft PR: ${result.message || 'Unknown error'}` }]
             };
         }
     }

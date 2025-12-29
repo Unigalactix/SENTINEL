@@ -113,6 +113,21 @@ app.get('/api/status', (req, res) => {
     res.json(systemStatus);
 });
 
+// List monitored Jira projects (keys)
+app.get('/api/projects', async (req, res) => {
+    try {
+        const { getAllProjectKeys } = require('./jiraService');
+        const keysCsv = await getAllProjectKeys();
+        const projects = (keysCsv || '')
+            .split(',')
+            .map(k => k.trim())
+            .filter(Boolean);
+        res.json({ projects });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
 // Manual Poll Trigger
 app.post('/api/poll', (req, res) => {
     console.log('[API] Check triggering manual poll...');
@@ -187,7 +202,7 @@ async function processTicketData(issue) {
     systemStatus.currentPhase = 'Processing';
     systemStatus.currentTicketKey = issueKey;
     systemStatus.currentTicketLogs = [];
-    systemStatus.currentJiraUrl = `${process.env.JIRA_BASE_URL} /browse/${issueKey} `;
+    systemStatus.currentJiraUrl = `${process.env.JIRA_BASE_URL}/browse/${issueKey}`;
     systemStatus.currentPrUrl = null;
     systemStatus.currentPayload = null;
 
@@ -371,7 +386,10 @@ async function processTicketData(issue) {
     try {
         // 1. Move to In Progress
         logProgress(`Transitioning Jira ticket to "In Progress"...`);
-        if (issueKey) await transitionIssue(issueKey, 'In Progress');
+        if (issueKey) {
+            await transitionIssue(issueKey, 'In Progress');
+            await addComment(issueKey, `🔄 Moving to In Progress`);
+        }
 
         // 1b. Get Default Branch (Dynamic)
         const defaultBranch = resolvedDefaultBranch || await getDefaultBranch(repoName);
@@ -460,6 +478,7 @@ async function processTicketData(issue) {
                 logProgress(`Posting Success comment to Jira...`);
                 await addComment(issueKey, `SUCCESS: Workflow PR created! \nLink: ${result.prUrl} `);
                 await transitionIssue(issueKey, postPrStatus);
+                await addComment(issueKey, `➡️ Moving to ${postPrStatus}`);
                 logProgress(`Ticket moved to "${postPrStatus}".`);
             }
         } else {
@@ -469,6 +488,7 @@ async function processTicketData(issue) {
                 logProgress(`Updates verified. Moving to configured post-PR status.`);
                 await addComment(issueKey, `VERIFIED: Workflow PR already exists.\nLink: ${result.prUrl} `);
                 await transitionIssue(issueKey, postPrStatus);
+                await addComment(issueKey, `➡️ Moving to ${postPrStatus}`);
                 logProgress(`Ticket moved to "${postPrStatus}".`);
             }
         }
@@ -488,11 +508,15 @@ async function processTicketData(issue) {
             language, // [NEW] for UI
             deployTarget, // [NEW] for UI
             checks: [],
+            headSha: result.headSha,
             copilotPrUrl: null,
             copilotMerged: false,
             copilotCreatedAt: null, // [NEW]
             copilotMergedAt: null,   // [NEW]
-            toolUsed: null           // [NEW]
+            toolUsed: null,          // [NEW]
+            prReadyCommented: false,
+            prMergedCommented: false,
+            failureCommentPosted: false
         };
         systemStatus.scanHistory.unshift(historyItem);
         // Add to monitored list
@@ -589,14 +613,16 @@ async function startPolling() {
                 // console.log('Checking CI status for monitored tickets...');
                 for (const ticket of systemStatus.monitoredTickets) {
                     if (!ticket.branch) continue;
-                    const checks = await getPullRequestChecks({
-                        repoName: ticket.repoName,
-                        ref: ticket.branch
-                    });
+                    const { getLatestWorkflowRunForRef, getJobsForRun, getPullRequestDetails, isPullRequestMerged, summarizeFailureFromRun, getLatestDeploymentUrl } = require('./githubService');
 
-                    // Update the check status in history
-                    // We need to find the history item and update it (ticket is a reference to history item if pushed directly)
-                    ticket.checks = checks;
+                    // Prefer headSha if present for precise run lookup
+                    const ref = ticket.headSha || ticket.branch;
+                    const latestRun = await getLatestWorkflowRunForRef({ repoName: ticket.repoName, ref });
+                    let jobs = [];
+                    if (latestRun && latestRun.id) {
+                        jobs = await getJobsForRun({ repoName: ticket.repoName, runId: latestRun.id });
+                    }
+                    ticket.checks = jobs.map(j => ({ name: j.name, status: j.status, conclusion: j.conclusion, url: j.html_url || (latestRun ? latestRun.html_url : '') }));
 
                     // Attempt to detect and merge Copilot sub PR into our feature branch
                     if (!ticket.copilotMerged && ticket.prUrl) {
@@ -670,42 +696,79 @@ async function startPolling() {
                         }
                     }
 
-                    // Check for Deployment Success
-                    if (!ticket.deploymentPosted && ticket.checks && ticket.checks.length > 0) {
-                        const deployCheck = ticket.checks.find(c => c.name === 'deploy' && c.conclusion === 'success');
-                        if (deployCheck) {
+                    // PR lifecycle comments: Ready for Review (only after Copilot SubPR is merged)
+                    if (ticket.prUrl && !ticket.prReadyCommented && ticket.copilotMerged) {
+                        try {
+                            const mainPrNumber = parseInt(ticket.prUrl.split('/').pop(), 10);
+                            const mainPr = await getPullRequestDetails({ repoName: ticket.repoName, pull_number: mainPrNumber });
+                            if (mainPr && mainPr.draft === false) {
+                                await addComment(ticket.key, `✅ **PR Ready for Review**\n\nLink: ${ticket.prUrl}`);
+                                ticket.prReadyCommented = true;
+                            }
+                        } catch (_) {}
+                    }
+
+                    // PR lifecycle comments: Merged
+                    if (ticket.prUrl && !ticket.prMergedCommented) {
+                        try {
+                            const mainPrNumber = parseInt(ticket.prUrl.split('/').pop(), 10);
+                            const merged = await isPullRequestMerged({ repoName: ticket.repoName, pullNumber: mainPrNumber });
+                            if (merged && merged.merged) {
+                                await addComment(ticket.key, `🎉 **PR Merged**\n\nLink: ${ticket.prUrl}`);
+                                ticket.prMergedCommented = true;
+                            }
+                        } catch (_) {}
+                    }
+
+                    // Deployment detection via workflow runs
+                    const deployJob = jobs.find(j => /deploy|deployment|release|publish/i.test(j.name || ''));
+                    let appUrl = process.env.DEPLOY_APP_URL || null;
+                    if (!appUrl) {
+                        appUrl = await getLatestDeploymentUrl({ repoName: ticket.repoName, ref });
+                    }
+                    if (!appUrl) {
+                        appUrl = 'https://mvdemoapp.azurewebsites.net';
+                    }
+                    // Post failure early if any job has concluded failure/cancelled/timed_out
+                    const anyFailedJob = jobs.find(j => ['failure','cancelled','timed_out'].includes(j.conclusion) && j.status === 'completed');
+                    if (!ticket.failureCommentPosted && anyFailedJob && latestRun) {
+                        const summary = summarizeFailureFromRun({ run: latestRun, jobs });
+                        await addComment(ticket.key, `❌ **Deployment Failed**\n\n${summary}`);
+                        ticket.failureCommentPosted = true;
+                        try {
+                            await transitionIssue(ticket.key, 'To Do');
+                            await addComment(ticket.key, `↩️ Moving back to To Do due to execution failure`);
+                            logProgress(`Ticket ${ticket.key} moved back to To Do after failure.`);
+                        } catch (e) {
+                            console.warn(`Failed to transition ${ticket.key} to To Do: ${e.message}`);
+                        }
+                    }
+
+                    if (!ticket.deploymentPosted && latestRun && (deployJob || latestRun.conclusion)) {
+                        // Success path
+                        if (deployJob && deployJob.conclusion === 'success') {
                             ticket.deploymentPosted = true;
                             logProgress(`Deployment detected for ${ticket.key}. Posting comment...`);
-                            // Hardcoded app name for now as per plan
-                            const appUrl = 'https://mvdemoapp.azurewebsites.net';
-                            await addComment(ticket.key, `🚀 **Deployment Successful!**\n\nThe application is live at: [${appUrl}](${appUrl})\n\n[View Deployment Logs](${deployCheck.url})`);
-
-                            // Transition ticket to Done now that deployment is confirmed
+                            const logUrl = deployJob.html_url || latestRun.html_url;
+                            await addComment(ticket.key, `🚀 **Deployment Successful!**\n\nThe application is live at: [${appUrl}](${appUrl})\n\n[View Deployment Logs](${logUrl})`);
                             try {
                                 await transitionIssue(ticket.key, 'Done');
+                                await addComment(ticket.key, `🏁 Moving to Done`);
                                 logProgress(`Ticket ${ticket.key} transitioned to "Done" after deployment.`);
                             } catch (e) {
                                 console.warn(`Failed to transition ${ticket.key} to Done: ${e.message}`);
                             }
-
-                            // Cleanup: Delete Copilot Branch if it was merged
-                            if (ticket.copilotMerged && ticket.copilotPrUrl) {
-                                // Extract branch name from PR URL? No, we didn't store branch name explicitly.
-                                // But we can get it from the cached PR URL or by fetching the PR again.
-                                // Optimally, we should have stored it. Let's try to fetch it quickly.
-                                try {
-                                    const prNum = parseInt(ticket.copilotPrUrl.split('/').pop(), 10);
-                                    if (!isNaN(prNum)) {
-                                        const subPrDetails = await getPullRequestDetails({ repoName: ticket.repoName, pull_number: prNum });
-                                        if (subPrDetails && subPrDetails.head && subPrDetails.head.ref) {
-                                            const branchToDelete = subPrDetails.head.ref;
-                                            logProgress(`Cleaning up: Deleting Copilot branch ${branchToDelete}...`);
-                                            await deleteBranch({ repoName: ticket.repoName, branchName: branchToDelete });
-                                        }
-                                    }
-                                } catch (cleanupErr) {
-                                    console.error('Cleanup failed:', cleanupErr.message);
-                                }
+                        }
+                        // Failure path
+                        else if ((deployJob && deployJob.conclusion === 'failure') || latestRun.conclusion === 'failure' || latestRun.conclusion === 'cancelled' || latestRun.conclusion === 'timed_out') {
+                            const summary = summarizeFailureFromRun({ run: latestRun, jobs });
+                            await addComment(ticket.key, `❌ **Deployment Failed**\n\n${summary}`);
+                            try {
+                                await transitionIssue(ticket.key, 'To Do');
+                                await addComment(ticket.key, `↩️ Moving back to To Do due to execution failure`);
+                                logProgress(`Ticket ${ticket.key} moved back to To Do after failure.`);
+                            } catch (e) {
+                                console.warn(`Failed to transition ${ticket.key} to To Do: ${e.message}`);
                             }
                         }
                     }
