@@ -61,10 +61,10 @@ graph TD
     ProjectDetect --> CheckAI{🧠 AI Enabled?}
     
     CheckAI -->|No| TemplateGen[📄 Load Static Template]
-    CheckAI -->|Yes| PromptGen[🤖 Prompt Copilot CLI]
+    CheckAI -->|Yes| CopilotPrompt[🤖 GitHub Copilot CLI]
     
-    PromptGen -->|API Timeout/Fail| FallbackMode[⚠️ Fallback to Template]
-    PromptGen -->|Success| CodeGen[✨ Generated Code/Workflow]
+    CopilotPrompt -->|API Timeout/Fail| FallbackMode[⚠️ Fallback to Template]
+    CopilotPrompt -->|Success| CodeGen[✨ Copilot Generated Code/Workflow]
     TemplateGen --> CodeGen
     FallbackMode --> CodeGen
 
@@ -144,9 +144,9 @@ graph TD
     *   **Requirement Parsing**: Extracts key requirements from the Jira ticket description.
 3.  **Validation**: Ensures the ticket has necessary metadata (Repo URL, etc.). If missing, it logs a warning and skips processing to prevent crashing.
 
-### Phase 2: Execution & Code Generation
-1.  **AI Orchestration (Optional)**: If `USE_GH_COPILOT=true`, the system constructs a prompt containing the ticket requirements and feeds it to the GitHub Copilot CLI.
-    *   **Failure Mode**: If Copilot Service is down or times out, the system gracefully degrades to using a standard CI/CD template ("Fallback Mode") to ensure a basic pipeline is still created.
+### Phase 2: Execution & Code Generation (GitHub Copilot)
+1.  **AI Orchestration via GitHub Copilot (Optional)**: If `USE_GH_COPILOT=true`, the system constructs a prompt containing the ticket requirements and feeds it to the GitHub Copilot CLI.
+    *   **Failure Mode**: If GitHub Copilot Service is down or times out, the system gracefully degrades to using a standard CI/CD template ("Fallback Mode") to ensure a basic pipeline is still created.
 2.  **Git Operations**:
     *   Creates a standardized branch name: `chore/{ticket-key}-workflow-setup`.
     *   If the branch already exists (re-run), it force-pushes the latest changes.
@@ -174,7 +174,7 @@ graph TD
 | :--- | :--- | :--- |
 | **Jira API is Down** | The Polling loop catches the `ECONNREFUSED` or `500` error. It logs the error to `server.log` and sleeps for the next cycle. | **Safe Retry**: No data corruption. |
 | **No "To Do" Tickets** | The system logs "Queue Empty" and sleeps. | **Idle**: Minimal resource usage. |
-| **Copilot hallucinations**| The generated code is invalid syntax. | **Caught by CI**: The GitHub Action build will fail. Phase 3 logic takes over (Alert Human). |
+| **GitHub Copilot hallucinations**| The Copilot-generated code has invalid syntax. | **Caught by CI**: The GitHub Action build will fail. Phase 3 logic takes over (Alert Human). |
 | **Merge Conflict** | GitHub API returns `409 Conflict`. | **Human Escalation**: The system flags the ticket in Jira, stopping the automation for that specific item. |
 | **Network Flakiness** | GitHub/Jira requests time out. | **Retry Logic**: All critical API calls have exponential backoff retries (1s, 2s, 4s). |
 | **Orchestrator Crash** | Node.js process exits. | **Restart**: If blocked by Docker/PM2, it auto-restarts. On boot, it rescans Jira and picks up where it left off (idempotent design). |
