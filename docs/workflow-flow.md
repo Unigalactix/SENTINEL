@@ -21,7 +21,7 @@ flowchart TD
     S3[Analyze Repo & Detect Language]
     S4[Generate Workflow YAML]
     S5[Ensure Feature Branch]
-    S6[Upsert Files (Workflow / Dockerfile)]
+    S6["Upsert Files (Workflow / Dockerfile)"]
     S7[Create or Reuse PR]
     S8[Comment PR with Copilot Prompt]
     S9[Monitor Runs & Jobs]
@@ -37,7 +37,7 @@ flowchart TD
 
   subgraph ACTIONS[GitHub Actions]
     A1[Build & Test]
-    A2[Security Scan (CodeQL)]
+    A2["Security Scan (CodeQL)"]
     A3{Container Build?}
     A4[Docker Build & Push]
     A5{Deploy to Azure?}
