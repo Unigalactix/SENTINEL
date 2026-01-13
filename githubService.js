@@ -195,6 +195,7 @@ function generateWorkflowFile({ language, repoName, buildCommand, testCommand, d
     deploy:
         runs-on: ubuntu-latest
         needs: [build, security-scan]
+        environment: 'Production'
         env:
             AZURE_WEBAPP_PUBLISH_PROFILE: \${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
             AZURE_WEBAPP_APP_NAME: \${{ secrets.AZURE_WEBAPP_APP_NAME }}
@@ -271,7 +272,7 @@ async function ensureFeatureBranch({ owner, repo, defaultBranch, featureBranch }
     const { data: baseRef } = await octokit.git.getRef({
         owner,
         repo,
-        ref: `heads / ${defaultBranch} `,
+        ref: `heads/${defaultBranch}`,
     });
 
     // 2. Try to get feature branch
@@ -279,7 +280,7 @@ async function ensureFeatureBranch({ owner, repo, defaultBranch, featureBranch }
         await octokit.git.getRef({
             owner,
             repo,
-            ref: `heads / ${featureBranch} `,
+            ref: `heads/${featureBranch}`,
         });
         console.log(`Branch ${featureBranch} already exists.`);
         return;
@@ -291,7 +292,7 @@ async function ensureFeatureBranch({ owner, repo, defaultBranch, featureBranch }
     await octokit.git.createRef({
         owner,
         repo,
-        ref: `refs / heads / ${featureBranch} `,
+        ref: `refs/heads/${featureBranch}`,
         sha: baseRef.object.sha,
     });
     console.log(`Created branch ${featureBranch}.`);
@@ -351,7 +352,7 @@ async function createWorkflowPR({ owner, repo, featureBranch, defaultBranch, tit
         owner,
         repo,
         state: 'open',
-        head: `${owner}:${featureBranch} `,
+        head: `${owner}:${featureBranch}`,
         base: defaultBranch,
     });
 
@@ -499,6 +500,7 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     needs: docker-build
+    environment: 'Production'
  
     steps:
       - name: Deploy to Azure Web App
