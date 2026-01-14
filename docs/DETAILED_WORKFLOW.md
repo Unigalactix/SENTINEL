@@ -9,6 +9,47 @@
 ## 1. Executive Summary
 
 This document details the architectural workflow of the **Jira Autopilot** system. It serves as a blueprint for the automation logic, defining data flow between the core orchestration engine (`server.js`), the External Project Management system (Jira), and the Version Control system (GitHub). This specification includes extensive "What-If" failure analysis to ensure system resilience.
+## BASIC HIGH LEVEL WORKFLOW
+
+flowchart LR
+    %% Define Styles
+    classDef plain fill:#fff,stroke:#333,stroke-width:2px;
+    classDef azure fill:#cceeff,stroke:#0072C6,stroke-width:2px;
+    classDef jira fill:#deebff,stroke:#0052CC,stroke-width:2px;
+    classDef git fill:#f6f8fa,stroke:#24292e,stroke-width:2px;
+
+    %% Nodes
+    User([fa:fa-user User]):::plain
+    JiraNode(fa:fa-jira Jira):::jira
+
+    subgraph "Automation Server"
+        Agent[fa:fa-cogs Jira Git<br/>Automation Agent]:::plain
+        Dash[fa:fa-tachometer-alt Dashboard<br/>Monitoring]:::plain
+    end
+
+    subgraph "GitHub Ecosystem"
+        GH(fa:fa-github GitHub<br/>Repository):::git
+        Action(fa:fa-play-circle GitHub<br/>Actions):::git
+        Copilot(fa:fa-robot GitHub<br/>Copilot):::git
+    end
+
+    subgraph "Azure Cloud"
+        %% Uses cylinder shape [() for registry
+        ACR[(fa:fa-docker Azure<br/>Container Registry)]:::azure
+        AppService(fa:fa-cloud Azure<br/>App Service):::azure
+    end
+
+    %% Connections with Action Labels
+    User -->|Creates Ticket| JiraNode
+    JiraNode <-->|Webhook / Trigger| Agent
+    Agent -->|Update Metrics| Dash
+    
+    Agent <-->|Push Code / PR| GH
+    GH <-->|Context / Suggestion| Copilot
+    GH <-->|Trigger Workflow| Action
+    
+    Action -->|Build & Push Image| ACR
+    ACR -->|Deploy Container| AppService
 
 ## 2. Core Workflow Diagram
 
