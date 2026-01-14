@@ -615,7 +615,7 @@ async function startPolling() {
                     console.log(`[Autopilot] Resumed monitoring PR ${pr.prUrl} for ticket ${issueKey}.`);
                     try {
                         await addComment(issueKey, `🔁 Server restarted: resuming monitoring for active PR\nPR: ${pr.prUrl}`);
-                    } catch (_) {}
+                    } catch (_) { }
                 } catch (e) {
                     console.warn(`[Autopilot] Failed to reconcile ${issueKey}: ${e.message}`);
                 }
@@ -768,7 +768,7 @@ async function startPolling() {
                                 await addComment(ticket.key, `✅ **PR Ready for Review**\n\nLink: ${ticket.prUrl}`);
                                 ticket.prReadyCommented = true;
                             }
-                        } catch (_) {}
+                        } catch (_) { }
                     }
 
                     // PR lifecycle comments: Merged
@@ -778,9 +778,10 @@ async function startPolling() {
                             const merged = await isPullRequestMerged({ repoName: ticket.repoName, pullNumber: mainPrNumber });
                             if (merged && merged.merged) {
                                 await addComment(ticket.key, `🎉 **PR Merged**\n\nLink: ${ticket.prUrl}`);
+                                await transitionIssue(ticket.key, 'Done');
                                 ticket.prMergedCommented = true;
                             }
-                        } catch (_) {}
+                        } catch (_) { }
                     }
 
                     // Deployment detection via workflow runs
@@ -793,7 +794,7 @@ async function startPolling() {
                         appUrl = 'https://mvdemoapp.azurewebsites.net';
                     }
                     // Post failure early if any job has concluded failure/cancelled/timed_out
-                    const anyFailedJob = jobs.find(j => ['failure','cancelled','timed_out'].includes(j.conclusion) && j.status === 'completed');
+                    const anyFailedJob = jobs.find(j => ['failure', 'cancelled', 'timed_out'].includes(j.conclusion) && j.status === 'completed');
                     if (!ticket.failureCommentPosted && anyFailedJob && latestRun) {
                         const summary = summarizeFailureFromRun({ run: latestRun, jobs });
                         await addComment(ticket.key, `❌ **Deployment Failed**\n\n${summary}`);
