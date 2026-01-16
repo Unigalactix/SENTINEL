@@ -21,8 +21,8 @@ const {
     isPullRequestMerged,
     approvePullRequest,
     getActiveOrgPRsWithJiraKeys
-} = require('./githubService');
-const { getPendingTickets, transitionIssue, addComment, getIssueDetails } = require('./jiraService');
+} = require('./src/services/githubService');
+const { getPendingTickets, transitionIssue, addComment, getIssueDetails } = require('./src/services/jiraService');
 require('dotenv').config();
 
 // Load optional per-board POST_PR_STATUS mapping
@@ -117,7 +117,7 @@ app.get('/api/status', (req, res) => {
 // List monitored Jira projects (keys)
 app.get('/api/projects', async (req, res) => {
     try {
-        const { getAllProjectKeys } = require('./jiraService');
+        const { getAllProjectKeys } = require('./src/services/jiraService');
         const keysCsv = await getAllProjectKeys();
         const projects = (keysCsv || '')
             .split(',')
@@ -693,7 +693,7 @@ async function startPolling() {
                 // console.log('Checking CI status for monitored tickets...');
                 for (const ticket of systemStatus.monitoredTickets) {
                     if (!ticket.branch) continue;
-                    const { getLatestWorkflowRunForRef, getJobsForRun, getPullRequestDetails, isPullRequestMerged, summarizeFailureFromRun, getLatestDeploymentUrl } = require('./githubService');
+                    const { getLatestWorkflowRunForRef, getJobsForRun, getPullRequestDetails, isPullRequestMerged, summarizeFailureFromRun, getLatestDeploymentUrl } = require('./src/services/githubService');
 
                     // Prefer headSha if present for precise run lookup
                     const ref = ticket.headSha || ticket.branch;

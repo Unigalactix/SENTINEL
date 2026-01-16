@@ -1,8 +1,8 @@
 const { McpServer, ResourceTemplate } = require('@modelcontextprotocol/sdk/server/mcp.js');
 const { StdioServerTransport } = require('@modelcontextprotocol/sdk/server/stdio.js');
 const { z } = require('zod');
-const { generateWorkflowFile, getPullRequestChecks } = require('./githubService');
-const { addComment } = require('./jiraService');
+const { generateWorkflowFile, getPullRequestChecks } = require('./src/services/githubService');
+const { addComment } = require('./src/services/jiraService');
 
 // Create the MCP Server
 const server = new McpServer({
@@ -106,7 +106,7 @@ server.tool(
         branchName: z.string().describe("Name of the branch to delete")
     },
     async ({ repoName, branchName }) => {
-        const { deleteBranch } = require('./githubService');
+        const { deleteBranch } = require('./src/services/githubService');
         const result = await deleteBranch({ repoName, branchName });
         if (result.deleted) {
             return {
@@ -130,7 +130,7 @@ server.tool(
         pullNumber: z.number().describe("The Pull Request Number")
     },
     async ({ repoName, pullNumber }) => {
-        const { markPullRequestReadyForReview } = require('./githubService');
+        const { markPullRequestReadyForReview } = require('./src/services/githubService');
         const result = await markPullRequestReadyForReview({ repoName, pullNumber });
         if (result.ok) {
             return {
@@ -155,7 +155,7 @@ server.tool(
         method: z.enum(['merge', 'squash', 'rebase']).optional().describe("Merge method (default: squash)")
     },
     async ({ repoName, pullNumber, method }) => {
-        const { mergePullRequest } = require('./githubService');
+        const { mergePullRequest } = require('./src/services/githubService');
         const result = await mergePullRequest({ repoName, pullNumber, method: method || 'squash' });
         if (result.merged) {
             return {
@@ -178,7 +178,7 @@ server.tool(
         issueKey: z.string().describe("The Jira Issue Key (e.g., NDE-123)")
     },
     async ({ issueKey }) => {
-        const { getIssueDetails } = require('./jiraService');
+        const { getIssueDetails } = require('./src/services/jiraService');
         const details = await getIssueDetails(issueKey);
         return {
             content: [{ type: "text", text: JSON.stringify(details, null, 2) }]

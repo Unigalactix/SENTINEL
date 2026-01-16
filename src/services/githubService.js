@@ -1301,6 +1301,7 @@ module.exports = {
     , getRepoDirectoryFiles
     , getRepoFileContent
     , listAccessibleRepos
+    , listRepoWorkflows
 };
 
 /**
@@ -1390,6 +1391,23 @@ async function getRepoDirectoryFiles(repoName, path = '') {
     } catch (error) {
         if (error.status === 404) return [];
         console.error(`Failed to get files for ${repoName}/${path}:`, error.message);
+        return [];
+    }
+}
+
+/**
+ * Lists all workflows in the repository with their status.
+ */
+async function listRepoWorkflows(repoName) {
+    const [owner, repo] = repoName.split('/');
+    try {
+        const { data } = await octokit.actions.listRepoWorkflows({
+            owner,
+            repo
+        });
+        return data.workflows || [];
+    } catch (error) {
+        console.error(`Failed to list workflows for ${repoName}:`, error.message);
         return [];
     }
 }

@@ -1,0 +1,59 @@
+{
+    "basicFiles": [
+        "readme.md",
+        "readme.txt",
+        "readme",
+        "license",
+        "license.md",
+        "license.txt",
+        "copying",
+        ".gitignore"
+    ],
+    "readmeChecks": {
+        "minLength": 100
+    },
+    "languageChecks": {
+        "node": {
+            "files": [
+                "package.json"
+            ],
+            "required": [],
+            "optional": [
+                ".npmrc"
+            ],
+            "recommended": [
+                ".eslintrc",
+                ".eslintrc.js",
+                ".eslintrc.json"
+            ]
+        },
+        "java": {
+            "files": [
+                "pom.xml"
+            ],
+            "required": [],
+            "optional": [],
+            "recommended": []
+        },
+        "python": {
+            "files": [
+                "requirements.txt",
+                "pyproject.toml"
+            ],
+            "required": [],
+            "optional": [],
+            "recommended": [
+                "pytest.ini"
+            ]
+        }
+    },
+    "workflowChecks": {
+        "requiredPath": ".github/workflows",
+        "deprecatedActions": [
+            "actions/checkout@v1",
+            "actions/checkout@v2",
+            "actions/setup-node@v1",
+            "actions/setup-node@v2"
+        ]
+    }
+}

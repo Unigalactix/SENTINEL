@@ -15,7 +15,7 @@ Currently, the tool checks for basic files (`README`, `LICENSE`, `.gitignore`). 
   - `PULL_REQUEST_TEMPLATE.md`: To standardize PR descriptions.
   - `dependabot.yml`: To ensure dependency updates are automated.
 
-## 2. Deeper Analysis Features
+## 2. Deeper Analysis Features ##implemented
 Instead of just checking for file existence, we can analyze the *content* and *context*:
 
 - **Language/Framework Detection**:
@@ -37,7 +37,7 @@ Instead of just checking for file existence, we can analyze the *content* and *c
   - Add labels (e.g., `audit`, `automation`) to created tickets for easier filtering.
   - Assign the ticket to a specific user (if configured) or the project lead.
 
-## 4. Usability & Performance
+## 4. Usability & Performance ##implemented
 - **CLI Arguments**:
   - Allow skipping the interactive menu by passing the repo name directly: `node scripts/inspect_repo.js owner/repo`.
 - **Batch Mode**:
