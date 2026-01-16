@@ -14,7 +14,7 @@ The Repo Inspector scans a target GitHub repository for the presence of essentia
 
 ## 2. Workflow Diagram
 
-The following flowchart illustrates the script's execution logic:
+The following flowchart illustrates the script's execution logic, including the new idempotency check:
 
 ```mermaid
 flowchart TD
@@ -46,15 +46,21 @@ flowchart TD
     HasFindings -->|No| SuccessExit([Exit: Repo Healthy])
     
     HasFindings -->|Yes| LoopFindings[Loop Through Findings]
-    LoopFindings --> CreateTicket[Attempt Create Jira Ticket]
+    LoopFindings --> GenerateDesc[Generate Description with Payload]
+    GenerateDesc --> SearchJira{Ticket Exists?}
     
+    SearchJira -->|Yes| UpdateTicket[Update Existing Ticket]
+    SearchJira -->|No| CreateTicket[Create New Jira Ticket]
+    
+    UpdateTicket --> LogSuccess[Log Success]
     CreateTicket --> TicketSuccess{Success?}
-    TicketSuccess -->|Yes| LogSuccess[Log Ticket Created]
+    
+    TicketSuccess -->|Yes| LogSuccess
     TicketSuccess -->|No| CheckError{Project Invalid?}
     
     CheckError -->|Yes| SelectProject[/User Selects New Project/]
-    SelectProject --> RetryCreate[Retry Create Ticket]
-    RetryCreate --> CreateTicket
+    SelectProject --> RetryCreate[Retry Action]
+    RetryCreate --> SearchJira
     
     CheckError -->|No| LogError[Log API Error]
     
@@ -65,6 +71,11 @@ flowchart TD
 ```
 
 ## 3. Usage Guide
+
+### Features
+-   **Idempotency**: The script checks if a ticket already exists for the specific finding (filtered by Project Key and Summary). If found, it **updates** the existing ticket instead of creating a duplicate.
+-   **Smart Templates**: Tickets include a structured description with a `Payload` section containing auto-detected Build and Test commands (e.g., `npm install`, `mvn test`).
+
 
 ### Prerequisites
 Ensure your `.env` file is configured with:
