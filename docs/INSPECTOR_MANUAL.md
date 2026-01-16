@@ -23,7 +23,7 @@ flowchart TD
     LoadConfig --> CheckArgs{Check CLI Arguments}
 
     %% Execution Modes
-    CheckArgs -->|--batch [file]| BatchFile[Read Repos from File]
+    CheckArgs -->|"--batch [file]"| BatchFile[Read Repos from File]
     CheckArgs -->|--batch| BatchAll[Fetch All Accessible Repos]
     CheckArgs -->|owner/repo| SingleRepo[Use Provided Repo Name]
     CheckArgs -->|No Args| Interactive[Interactive Menu]
