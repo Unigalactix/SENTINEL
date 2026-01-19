@@ -768,9 +768,16 @@
                 </svg>
                 Autopilot Monitor
             </div>
-            <div class="timer-badge">
-                <span id="phaselabel">WAITING</span>
-                <span id="countdown" class="timer-val">--</span>
+            <div style="display: flex; gap: 1rem; align-items: center;">
+                <button id="btnPause" class="btn btn-small"
+                    style="background: rgba(255,165,0,0.2); color: orange; border: 1px solid orange;"
+                    onclick="togglePause()">
+                    ⏸ Pause
+                </button>
+                <div class="timer-badge">
+                    <span id="phaselabel">WAITING</span>
+                    <span id="countdown" class="timer-val">--</span>
+                </div>
             </div>
         </header>
 
@@ -1166,20 +1173,61 @@
             }
         }
 
+        // --- Pause/Resume Logic ---
+        let isSystemPaused = false;
+        async function togglePause() {
+            const newState = !isSystemPaused;
+            try {
+                const res = await fetch('/api/pause', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ paused: newState })
+                });
+                const data = await res.json();
+                isSystemPaused = data.paused;
+                updatePauseButtonUI();
+            } catch (e) {
+                console.error("Failed to toggle pause", e);
+            }
+        }
+
+        function updatePauseButtonUI() {
+            const btn = document.getElementById('btnPause');
+            if (isSystemPaused) {
+                btn.innerHTML = "▶ Resume";
+                btn.style.borderColor = "var(--success)";
+                btn.style.color = "var(--success)";
+                btn.style.background = "rgba(16, 185, 129, 0.15)";
+            } else {
+                btn.innerHTML = "⏸ Pause";
+                btn.style.borderColor = "orange";
+                btn.style.color = "orange";
+                btn.style.background = "rgba(255, 165, 0, 0.15)";
+            }
+        }
 
         async function fetchStatus() {
             try {
                 const res = await fetch('/api/status');
                 const data = await res.json();
 
+                // Sync Pause State
+                if (data.paused !== undefined && data.paused !== isSystemPaused) {
+                    isSystemPaused = data.paused;
+                    updatePauseButtonUI();
+                }
+
                 // 1. Update Timer
                 document.getElementById('phaselabel').innerText = data.currentPhase.toUpperCase();
                 if (data.nextScanTime && data.currentPhase === 'Waiting') {
                     const diff = Math.ceil((data.nextScanTime - Date.now()) / 1000);
                     document.getElementById('countdown').innerText = (diff > 0 ? diff : 0) + 's';
+                } else if (data.currentPhase === 'Paused') {
+                    document.getElementById('countdown').innerText = 'PAUSED';
                 } else {
                     document.getElementById('countdown').innerText = '...';
                 }
+
 
                 // 2. Update Hero
                 const hero = document.getElementById('heroSection');
