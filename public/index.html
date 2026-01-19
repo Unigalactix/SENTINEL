@@ -806,6 +806,16 @@
                             </svg>
                             Download Logs
                         </a>
+
+                        <!-- Inspect Repo Button -->
+                        <button class="btn btn-jira" id="btnInspect" onclick="openInspectModal()">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <circle cx="11" cy="11" r="8"></circle>
+                                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                            </svg>
+                            Inspect Repo
+                        </button>
                         <!-- New MCP Inspector Button -->
                         <!-- New MCP Inspector Button -->
 
@@ -913,6 +923,27 @@
             </div>
             <div class="modal-body">
                 <pre id="modalPayloadContent"></pre>
+            </div>
+        </div>
+    </div>
+
+    <!-- Inspect Repo Modal -->
+    <div id="inspectModal" class="modal-overlay" onclick="closeInspectModal(event)">
+        <div class="modal-content" style="max-width: 500px; height: auto; max-height: 80vh;">
+            <div class="modal-header">
+                <h3>Inspect Repository</h3>
+                <button onclick="closeInspectModal()" class="btn-close">×</button>
+            </div>
+            <div class="modal-body" style="padding: 2rem; display: flex; flex-direction: column; gap: 1rem;">
+                <label for="repoSelect" style="color: #ccc; font-weight: 500;">Select Repository:</label>
+                <select id="repoSelect"
+                    style="padding: 10px; border-radius: 8px; background: #2d2d2d; color: white; border: 1px solid #444; font-size: 1rem;">
+                    <option value="" disabled selected>Loading repositories...</option>
+                </select>
+                <button id="btnStartInspect" onclick="triggerInspect()" class="btn btn-primary"
+                    style="margin-top: 1rem; background: var(--primary); color: white; justify-content: center;">
+                    Start Inspection
+                </button>
             </div>
         </div>
     </div>
@@ -1077,6 +1108,64 @@
                 if (!modal.classList.contains('active')) modal.style.display = "none";
             }, 300);
         }
+
+        // --- Inspect Modal Logic ---
+        async function openInspectModal() {
+            const modal = document.getElementById('inspectModal');
+            modal.style.display = "flex";
+            setTimeout(() => modal.classList.add('active'), 10);
+            await loadRepos();
+        }
+
+        function closeInspectModal(e) {
+            if (e && e.target !== e.currentTarget && e.target.tagName !== 'BUTTON') return;
+            const modal = document.getElementById('inspectModal');
+            modal.classList.remove('active');
+            setTimeout(() => {
+                if (!modal.classList.contains('active')) modal.style.display = "none";
+            }, 300);
+        }
+
+        async function loadRepos() {
+            const select = document.getElementById('repoSelect');
+            select.innerHTML = '<option disabled selected>Loading...</option>';
+            try {
+                const res = await fetch('/api/repos');
+                const repos = await res.json();
+
+                if (repos && repos.length > 0) {
+                    select.innerHTML = '<option disabled selected>Select a repository</option>' +
+                        repos.map(r => `<option value="${r.full_name}">${r.full_name}</option>`).join('');
+                } else {
+                    select.innerHTML = '<option disabled>No repositories found</option>';
+                }
+            } catch (e) {
+                console.error("Failed to load repos", e);
+                select.innerHTML = '<option disabled>Error loading repos</option>';
+            }
+        }
+
+        async function triggerInspect() {
+            const select = document.getElementById('repoSelect');
+            const repoName = select.value;
+            if (!repoName) return;
+
+            playTone('success');
+            closeInspectModal();
+
+            try {
+                await fetch('/api/inspect', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ repoName })
+                });
+                // Status polling will automatically pick up the new "INSPECT" ticket key
+            } catch (e) {
+                console.error("Failed to start inspection", e);
+                alert("Failed to start inspection");
+            }
+        }
+
 
         async function fetchStatus() {
             try {

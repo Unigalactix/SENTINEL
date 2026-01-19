@@ -209,6 +209,48 @@ function logProgress(message) {
     writeLog(message);
 }
 
+// --- API for Repos ---
+app.get('/api/repos', async (req, res) => {
+    try {
+        const { listAccessibleRepos } = require('./src/services/githubService');
+        const repos = await listAccessibleRepos();
+        res.json(repos);
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// --- API for Inspection ---
+app.post('/api/inspect', async (req, res) => {
+    const { repoName } = req.body;
+    if (!repoName) return res.status(400).json({ error: 'repoName is required' });
+
+    console.log(`[API] Triggering inspection for ${repoName}`);
+    systemStatus.currentPhase = 'Scanning';
+    systemStatus.currentTicketKey = `INSPECT: ${repoName}`;
+    systemStatus.currentTicketLogs = [];
+    logProgress(`Starting manual inspection for ${repoName}...`);
+
+    try {
+        const { processRepo } = require('./scripts/inspect_repo');
+        // Run inspection with a custom logger that feeds into UI logs
+        await processRepo(repoName, false, (msg) => {
+            logProgress(msg);
+        });
+        logProgress(`Inspection complete for ${repoName}.`);
+        res.json({ message: 'Inspection complete' });
+    } catch (e) {
+        logProgress(`Error during inspection: ${e.message}`);
+        res.status(500).json({ error: e.message });
+    } finally {
+        setTimeout(() => {
+            systemStatus.currentPhase = 'Waiting';
+            systemStatus.currentTicketKey = null;
+        }, 5000);
+    }
+});
+
+
 // --- Core Logic ---
 async function processTicketData(issue) {
     if (!issue || !issue.fields) return;
