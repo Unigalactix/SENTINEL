@@ -14,7 +14,15 @@ const {
     searchIssues,
     updateIssue
 } = require('../src/services/jiraService');
-require('dotenv').config();
+const dotenv = require('dotenv');
+dotenv.config();
+
+const { JIRA_PROJECT_KEY } = process.env;
+
+if (!JIRA_PROJECT_KEY) {
+    console.error('❌ Error: JIRA_PROJECT_KEY is not defined in .env file.');
+    process.exit(1);
+}
 
 // --- Config Loading ---
 const CONFIG_PATH = path.join(__dirname, '..', 'config', 'repo-inspector.config.json');
@@ -42,6 +50,18 @@ try {
 
 // Helper to flatten config arrays for easy checking
 const ALL_BASIC_FILES = config.basicFiles || [];
+
+// --- Interactive Input Setup ---
+const readline = require('readline');
+const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout
+});
+
+function askQuestion(query) {
+    return new Promise(resolve => rl.question(query, resolve));
+}
+
 
 // --- Logic ---
 
