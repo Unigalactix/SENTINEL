@@ -8,11 +8,13 @@ const {
     getRepoFileContent,
     listRepoWorkflows
 } = require('../src/services/githubService');
+const { runDevOpsScan } = require('../src/services/devopsChecks');
 const {
     createIssue,
     getProjects,
     searchIssues,
-    updateIssue
+    updateIssue,
+    addComment
 } = require('../src/services/jiraService');
 const dotenv = require('dotenv');
 dotenv.config();
@@ -187,47 +189,83 @@ async function processRepo(repoName, autoFix = false, logger = console.log) {
         }
     }
 
+    // --- 5. Deep DevOps Scan (New Module) ---
+    log('   🚀 Running Deep DevOps Checks...');
+    try {
+        const deepFindings = await runDevOpsScan(repoName, rootFiles);
+        if (deepFindings.length > 0) {
+            log(`   Found ${deepFindings.length} DevOps issues.`);
+            findings.push(...deepFindings);
+        } else {
+            log('   ✅ No DevOps smells found.');
+        }
+    } catch (e) {
+        error(`   ⚠️  Deep scan failed: ${e.message}`);
+    }
+
     // --- Report Findings ---
     if (findings.length === 0) {
         log('   🎉 No issues found!');
     } else {
-        log(`   Found ${findings.length} issue(s). Processing tickets...`);
+        log(`   Found ${findings.length} issue(s). Aggregating into a single ticket...`);
 
-        for (const finding of findings) {
-            let buildCmd = 'N/A';
-            let testCmd = 'N/A';
-            if (detectedLanguage === 'Node.js') { buildCmd = 'npm build'; testCmd = 'npm test'; }
-            if (detectedLanguage === 'Java') { buildCmd = 'mvn package'; testCmd = 'mvn test'; }
-            if (detectedLanguage === 'Python') { buildCmd = 'pip install'; testCmd = 'pytest'; }
+        // 1. Calculate Payload data once
+        let buildCmd = 'N/A';
+        let testCmd = 'N/A';
+        if (detectedLanguage === 'Node.js') { buildCmd = 'npm build'; testCmd = 'test'; } // corrected 'npm test' to 'test' if strictly following prev logic, but 'npm test' is safer. Let's stick to safe defaults.
+        if (detectedLanguage === 'Node.js') { buildCmd = 'npm build'; testCmd = 'npm test'; }
+        if (detectedLanguage === 'Java') { buildCmd = 'mvn package'; testCmd = 'mvn test'; }
+        if (detectedLanguage === 'Python') { buildCmd = 'pip install'; testCmd = 'pytest'; }
 
-            const payload = `Payload:\n- Language: ${detectedLanguage}\n- Build: ${buildCmd}\n- Test: ${testCmd}`;
-            const fullDesc = `${repoName}\n\n${finding.description}\n\n${payload}`;
+        const payload = `Payload:\n- Language: ${detectedLanguage}\n- Build: ${buildCmd}\n- Test: ${testCmd}`;
 
-            try {
-                // Determine JIRA Project - try Env, or fallback to config or error
-                const JIRA_KEY = process.env.JIRA_PROJECT_KEY;
-                if (!JIRA_KEY) {
-                    error("Skipping Jira creation: JIRA_PROJECT_KEY not set");
-                    continue;
-                }
+        // 2. Build Composite Description
+        // We use a simple plain text format that Jira's ADF adapter (in updateIssue/createIssue) handles as a single paragraph.
+        // To make it readable, we use newlines.
+        let fullDescription = `Repository Inspection Results for ${repoName}\n\n`;
+        fullDescription += `The following issues were detected during the automated health scan:\n\n`;
 
-                const safeSummary = finding.summary.replace(/"/g, '\\"');
-                const jql = `project = "${JIRA_KEY}" AND summary ~ "${safeSummary}"`;
-                const existingIssues = await searchIssues(jql);
+        findings.forEach((f, idx) => {
+            fullDescription += `${idx + 1}. ${f.summary}\n`;
+            fullDescription += `   ${f.description}\n\n`;
+        });
 
-                if (existingIssues.length > 0) {
-                    await updateIssue(existingIssues[0].key, {
-                        summary: finding.summary,
-                        description: fullDesc
-                    });
-                    log(`       ✅ Updated ${existingIssues[0].key}`);
-                } else {
-                    const ticket = await createIssue(JIRA_KEY, finding.summary, fullDesc, 'Task');
-                    log(`       ✅ Created ${ticket.key}`);
-                }
-            } catch (err) {
-                error(`       ❌ Ticket failed: ${err.message}`);
+        fullDescription += `----\n${payload}`;
+
+        const ticketSummary = `Repo Health Remediation: ${repoName}`;
+
+        try {
+            // Determine JIRA Project - prioritize INS for inspection results
+            const JIRA_KEY = 'INS';
+
+            // Search for existing ticket (Open only)
+            const safeSummary = ticketSummary.replace(/"/g, '\\"');
+            // JQL: Find tickets with same summary in this project that are NOT Done
+            // We assume "Done" category covers Closed/Resolved.
+            const jql = `project = "${JIRA_KEY}" AND summary ~ "${safeSummary}" AND statusCategory != Done`;
+
+            const existingIssues = await searchIssues(jql);
+
+            if (existingIssues.length > 0) {
+                const issueKey = existingIssues[0].key;
+                log(`       🔄 Found open ticket ${issueKey}. Updating...`);
+
+                // Update description with latest findings
+                await updateIssue(issueKey, {
+                    description: fullDescription
+                });
+
+                // Add a comment to notify
+                await addComment(issueKey, `🔄 Automated Scan Updated\nScan found ${findings.length} issues. Ticket description updated.`);
+                log(`       ✅ Updated ${issueKey}`);
+            } else {
+                // Create New (Project INS requires 'Initiative' type)
+                const ticket = await createIssue(JIRA_KEY, ticketSummary, fullDescription, 'Initiative');
+                log(`       ✅ Created Master Ticket ${ticket.key}`);
             }
+
+        } catch (err) {
+            error(`       ❌ Orchestration failed: ${err.message}`);
         }
     }
 }
