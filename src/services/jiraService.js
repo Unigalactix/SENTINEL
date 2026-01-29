@@ -91,8 +91,8 @@ async function getPendingTickets() {
         projectKeys = await getAllProjectKeys();
     }
 
-    // JQL: Broad scope for any 'New'/'To Do' items
-    const jql = `project IN (${projectKeys}) AND statusCategory = "To Do" ORDER BY priority DESC`;
+    // JQL: Broad scope for any 'New'/'To Do' items, excluding INS board
+    const jql = `project IN (${projectKeys}) AND project != "INS" AND statusCategory = "To Do" ORDER BY priority DESC`;
 
     try {
         const result = await jiraRequest('/rest/api/3/search/jql', 'POST', {

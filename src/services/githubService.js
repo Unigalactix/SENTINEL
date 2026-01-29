@@ -1272,6 +1272,47 @@ async function getActiveOrgPRsWithJiraKeys({ org, maxPages = 4 }) {
     return results.filter(r => !!r.jiraKey);
 }
 
+
+/**
+ * Gets branch protection rules. 
+ * Returns null if no protection or 404.
+ */
+async function getBranchProtection(repoName, branch) {
+    const [owner, repo] = repoName.split('/');
+    try {
+        const { data } = await octokit.repos.getBranchProtection({
+            owner,
+            repo,
+            branch
+        });
+        return data;
+    } catch (error) {
+        // 404 means no protection usually
+        if (error.status === 404) return null;
+        // 403 might mean we don't have permission to view settings, assume unknown/null
+        console.warn(`Failed to get branch protection for ${repoName}/${branch}:`, error.message);
+        return null;
+    }
+}
+
+/**
+ * Lists releases for a repo.
+ */
+async function getReleases(repoName) {
+    const [owner, repo] = repoName.split('/');
+    try {
+        const { data } = await octokit.repos.listReleases({
+            owner,
+            repo,
+            per_page: 5
+        });
+        return data;
+    } catch (error) {
+        console.warn(`Failed to list releases for ${repoName}:`, error.message);
+        return [];
+    }
+}
+
 module.exports = {
     generateWorkflowFile,
     createPullRequestForWorkflow,
@@ -1294,14 +1335,17 @@ module.exports = {
     approvePullRequest,
     getLatestWorkflowRunForRef,
     getJobsForRun,
-    summarizeFailureFromRun
-    , getLatestDeploymentUrl
-    , checkRepoAccess
-    , getRepoRootFiles
-    , getRepoDirectoryFiles
-    , getRepoFileContent
-    , listAccessibleRepos
-    , listRepoWorkflows
+    summarizeFailureFromRun,
+    getLatestDeploymentUrl,
+    checkRepoAccess,
+    getRepoRootFiles,
+    getRepoDirectoryFiles,
+    getRepoFileContent,
+    listAccessibleRepos,
+    listRepoWorkflows,
+    getActiveOrgPRsWithJiraKeys,
+    getBranchProtection,
+    getReleases
 };
 
 /**
