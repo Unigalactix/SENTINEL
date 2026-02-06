@@ -1,6 +1,6 @@
 # System Architecture & Workflow Specification
 
-**Project:** Jira Autopilot & GitHub Automation Service  
+**Project:** Sentinel DevOps Orchestrator  
 **Version:** 1.0.0  
 **Document Type:** Architecture Overview  
 
@@ -8,7 +8,7 @@
 
 ## 1. Executive Summary
 
-This document details the architectural workflow of the **Jira Autopilot** system. It serves as a blueprint for the automation logic, defining data flow between the core orchestration engine (`server.js`), the External Project Management system (Jira), and the Version Control system (GitHub). This specification includes extensive "What-If" failure analysis to ensure system resilience.
+This document details the architectural workflow of the **Sentinel** system. It serves as a blueprint for the automation logic, defining data flow between the core orchestration engine (`server.js`), the External Project Management system (Jira), and the Version Control system (GitHub). This specification includes extensive "What-If" failure analysis to ensure system resilience.
 ## BASIC HIGH LEVEL WORKFLOW
 
 ```mermaid
@@ -57,7 +57,7 @@ flowchart LR
 
 ## 2. Core Workflow Diagram
 
-The following Mermaid diagram outlines the end-to-end lifecycle of a Jira Ticket as it is processed by the Autopilot, including decision gates, external API interactions, and exception handling paths.
+The following Mermaid diagram outlines the end-to-end lifecycle of a Jira Ticket as it is processed by the Sentinel, including decision gates, external API interactions, and exception handling paths.
 
 ```mermaid
 graph TD
@@ -77,7 +77,7 @@ graph TD
     Start((START)) --> UserAction[👤 User Creates Ticket]
     UserAction -->|Move to 'To Do'| JiraState[📋 Jira: To Do Queue]
 
-    subgraph ORCHESTRATOR [🤖 Autopilot Orchestrator]
+    subgraph ORCHESTRATOR [🤖 Sentinel Orchestrator]
         direction TB
         PollTimer{🕒 Poll Interval<br/>Every 30s}
         JiraFetch[📡 Fetch Tickets]
@@ -206,7 +206,7 @@ graph TD
     *   **Draft Handling**: Initially creates the PR as a "Draft" to signal work-in-progress to the team.
 
 ### Phase 3: Verification (CI/CD)
-1.  **Automated Testing**: GitHub Actions triggers immediately. The Autopilot monitors the status via the GitHub Check Request API.
+1.  **Automated Testing**: GitHub Actions triggers immediately. The Sentinel monitors the status via the GitHub Check Request API.
 2.  **Logic Gates**:
     *   **If Tests Fail**: The system detects the failure. It grabs the build logs, formats them, and posts them back to the Jira ticket essentially saying *"I tried, but the build failed here. Human help needed."* The ticket is NOT moved to Done.
     *   **If Tests Pass**: The system proceeds to the Merge Strategy.

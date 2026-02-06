@@ -1,7 +1,7 @@
 {
-  "name": "jira-github-automation",
+  "name": "sentinel",
   "version": "1.0.0",
-  "description": "Automation service to generate GitHub Actions workflows from Jira tickets",
+  "description": "Sentinel: Autonomous DevOps Agent for Jira and GitHub Automation",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

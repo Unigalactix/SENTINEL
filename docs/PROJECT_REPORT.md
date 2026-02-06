@@ -1,15 +1,15 @@
-# Jira Autopilot: The Digital Project Manager
+# Sentinel: The Digital DevOps Agent
 
 ## Executive Summary
 
-**What is this?**
-This project, "Jira Autopilot," is an intelligent automation system that acts as a bridge between your project management tool (Jira) and your code repository (GitHub).
+**What Is This?**
+This project, "Sentinel," is an intelligent automation system that acts as a bridge between your project management tool (Jira) and your code repository (GitHub).
 
-**Why do we need it?**
+**Why does this matter?**
 Software development involves many repetitive administrative steps: creating branches, copying descriptions, asking AI for code suggestions, and monitoring progress. This system automates all of that "busy work," allowing developers to focus on higher-level problem solving.
 
 **The Analogy**
-Think of the Autopilot as a **Junior Developer who works 24/7**.
+Think of the Sentinel as a **Junior Developer who works 24/7**.
 1.  You assign them a task in Jira.
 2.  **They analyze the codebase and plan the fix (Agentic AI).**
 3.  They immediately start working on it.
@@ -25,10 +25,10 @@ To understand how the system works, let's follow a single task from start to fin
 
 ### Phase 1: Planning (The Trigger)
 *   **Human Action**: You create a ticket in Jira (e.g., "Create a new Login Page") and move it to the "To Do" column.
-*   **System Response**: The Autopilot is constantly watching the "To Do" column. It spots the new ticket within 60 seconds.
+*   **System Response**: The Sentinel is constantly watching the "To Do" column. It spots the new ticket within 60 seconds.
 
 ### Phase 2: Execution (The Creation)
-*   **System Action**: The Autopilot "reads" the ticket description to understand what needs to be built.
+*   **System Action**: The Sentinel "reads" the ticket description to understand what needs to be built.
 *   **Agentic Analysis**: It scans the repository for **Secrets** and **Structure**, then uses Azure OpenAI to draft a "Fix Strategy."
 *   **AI Integration**: It sends this strategy to the **AI Coder** (GitHub Copilot CLI) and says, "Please write code to solve this problem."
 *   **Code Delivery**: The AI writes the code (e.g., HTML for the login form, CSS for styling).
@@ -52,7 +52,7 @@ To understand how the system works, let's follow a single task from start to fin
 Sometimes, automation isn't enough. You might want to take control yourself or have another AI agent assist. We provide a **Control Panel** (called the MCP Server) with specific buttons you can push using an AI interface (like Claude):
 
 1.  **`undraft_pr` (The "Ready" Button)**:
-    *   *Scenario*: The Autopilot created a Draft PR, but you know it's actually perfect.
+    *   *Scenario*: The Sentinel created a Draft PR, but you know it's actually perfect.
     *   *Action*: You use this tool to instantly mark it as "Ready for Review" so it can be merged.
 
 2.  **`merge_pr` (The "Force Merge" Button)**:

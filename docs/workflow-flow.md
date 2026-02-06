@@ -54,7 +54,7 @@ flowchart TD
   end
 
   %% Main happy path
-  J1 -->|Autopilot poll| S1 --> S2 --> S3 --> S3A --> S4 --> S5 --> S6 --> S7 --> G1
+  J1 -->|Sentinel poll| S1 --> S2 --> S3 --> S3A --> S4 --> S5 --> S6 --> S7 --> G1
   S2 -->|Transition| J2
   S7 -->|Comment PR| S8 --> G2
   G1 -->|Triggers| A1 --> A2 --> A3

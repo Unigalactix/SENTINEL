@@ -1,12 +1,11 @@
-# Jira Autopilot & GitHub Automation Service 🚀
+# Sentinel 🛡️
+> *Autonomous DevOps Agent & Orchestrator for Jira and GitHub*
 
-A comprehensive Node.js automation service that bridges Jira and GitHub. It acts as an autonomous agent that polls Jira for tickets, intelligently detects project requirements (Language, Repo), and generates remote CI/CD workflows via GitHub Pull Requests.
-
-![alt text](image.png)
+Sentinel is a comprehensive automation service that acts as an autonomous agent. It proactively polls Jira for tickets, intelligently detects project requirements, and orchestrates remote CI/CD workflows via GitHub Pull Requests.
 
 ## Features ✨
 
--   **Autopilot Polling**: Automatically polls Jira every 30 seconds for new tickets.
+-   **Sentinel Polling**: Automatically polls Jira every 30 seconds for new tickets.
 -   **Dynamic Project Discovery**: Automatically detects all available Jira projects (no need to hardcode keys).
 -   **Agentic AI (Azure OpenAI)**: The system now possesses cognitive capabilities:
     -   **Secret Discovery**: Automatically detects available GitHub Secrets (`AZURE_CREDENTIALS`, etc.).
@@ -126,14 +125,14 @@ This project includes an **MCP Server** (`mcpServer.js`).
 Add this to your Claude Desktop config to give your AI access to the agent's tools:
 ```json
 "mcpServers": {
-  "jira-autopilot": {
+  "sentinel": {
     "command": "node",
-    "args": ["/absolute/path/to/AUTOMATION/mcpServer.js"]
+    "args": ["/absolute/path/to/SENTINEL/mcpServer.js"]
   }
 }
 ```
 **Capabilities:**
--   `autopilot://status`: Read live system status.
+-   `sentinel://status`: Read live system status.
 -   `generate_workflow_yaml`: Ask AI to draft a CI file using the service's logic.
 -   `check_pr_status`: Ask AI to check if a specific PR is passing.
 
@@ -167,8 +166,8 @@ graph TD
     class TicketState,Comment,MoveDone jira
     class HumanAlert fail
 
-    %% Subgraph: Autopilot
-    subgraph BOT ["🤖 Autopilot (Orchestrator)"]
+    %% Subgraph: Sentinel
+    subgraph BOT ["🤖 Sentinel (Orchestrator)"]
         direction TB
         Scan["👀 Scan & Detect"]
         Analyze["🧠 Analyze & Prompt"]

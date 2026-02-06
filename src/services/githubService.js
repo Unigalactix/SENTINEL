@@ -1110,7 +1110,7 @@ async function approvePullRequest({ repoName, pullNumber }) {
             repo,
             pull_number: pullNumber,
             event: 'APPROVE',
-            body: '✅ Auto-approved by Jira Autopilot.'
+            body: '✅ Auto-approved by Sentinel.'
         });
         return { approved: true };
     } catch (e) {

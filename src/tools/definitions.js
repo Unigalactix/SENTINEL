@@ -155,7 +155,7 @@ const tools = [
     },
     {
         name: "trigger_manual_poll",
-        description: "Force the Autopilot to check Jira for new tickets immediately.",
+        description: "Force the Sentinel to check Jira for new tickets immediately.",
         schema: z.object({}),
         handler: async () => {
             try {
@@ -171,7 +171,7 @@ const tools = [
     },
     {
         name: "list_active_repos",
-        description: "List all Jira projects currently being monitored by the Autopilot.",
+        description: "List all Jira projects currently being monitored by the Sentinel.",
         schema: z.object({}),
         handler: async () => {
             try {

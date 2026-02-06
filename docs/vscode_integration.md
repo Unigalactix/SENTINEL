@@ -1,6 +1,6 @@
-# Integrate Jira Autopilot MCP with GitHub Copilot (VS Code)
+# Integrate Sentinel MCP with GitHub Copilot (VS Code)
 
-This guide explains how to connect the running **Jira Autopilot MCP Server** to **GitHub Copilot Chat** in VS Code via the Model Context Protocol (MCP).
+This guide explains how to connect the running **Sentinel MCP Server** to **GitHub Copilot Chat** in VS Code via the Model Context Protocol (MCP).
 
 Once connected, Copilot can:
 - **Read Jira Tickets**: "What is the acceptance criteria for NDE-123?"
@@ -9,7 +9,7 @@ Once connected, Copilot can:
 
 ## Prerequisites
 1.  **Node.js** installed.
-2.  **Jira Autopilot** repository cloned.
+2.  **Sentinel** repository cloned.
 3.  **VS Code** with **Cline** (or compatible extension) installed.
 
 ---
@@ -29,7 +29,7 @@ Use either the Settings UI or settings JSON. Both approaches are equivalent.
   1. Open VS Code Settings (Ctrl+,).
   2. Search for "Copilot MCP" or "MCP Servers" under GitHub Copilot Chat.
   3. Add a new MCP server:
-     - Name: `jira-autopilot`
+     - Name: `sentinel`
      - Command: `node`
      - Args: `C:\\Users\\RajeshKodaganti(Quad\\Downloads\\GITHUB\\AUTOMATION\\mcpServer.js`
      - Env → `PATH`: `C:\\Program Files\\nodejs;${env:PATH}`
@@ -41,7 +41,7 @@ Use either the Settings UI or settings JSON. Both approaches are equivalent.
 ```json
 {
   "mcpServers": {
-    "jira-autopilot": {
+    "sentinel": {
       "command": "node",
       "args": [
         "C:\\Users\\RajeshKodaganti(Quad\\Downloads\\GITHUB\\AUTOMATION\\mcpServer.js"

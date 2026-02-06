@@ -2,7 +2,7 @@
 
 This document serves as the technical specification for the Autonomous Agents and Interfaces in this system.
 
-## 1. Jira Autopilot Agent
+## 1. Sentinel Agent
 **Runtime**: Node.js (`server.js`)
 **Role**: DevOps Engineer
 **Loop Interval**: 30 Seconds
@@ -80,7 +80,7 @@ This server exposes the internal tools of the automation service to external AI 
 
 ### Exposed Tools & Resources
 
-#### `autopilot://status` (Resource)
+#### `sentinel://status` (Resource)
 Returns a live JSON snapshot of the system state:
 -   Active Queue
 -   Processing Phase
@@ -100,7 +100,7 @@ Returns a live JSON snapshot of the system state:
 **Parameters**:
 -   `repoName`: String
 -   `ref`: Branch name or Commit SHA
--   `autopilot://status`: A resource URI to read the live JSON state of the system queue.
+-   `sentinel://status`: A resource URI to read the live JSON state of the system queue.
 -   `add_jira_comment`: Helper tool to post manual comments to tickets.
 
 ---
@@ -115,7 +115,7 @@ flowchart TD
         Done(Done State)
     end
 
-    subgraph Autopilot_Engine [Node.js Agent - 30s Loop]
+    subgraph Sentinel_Engine [Node.js Agent - 30s Loop]
         Poll[Poll 'To Do']
         Analyze{Context Analysis}
         Gen[Generate Content]

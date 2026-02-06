@@ -6,7 +6,7 @@ const { addComment } = require('./src/services/jiraService');
 
 // Create the MCP Server
 const server = new McpServer({
-    name: "Jira Autopilot MCP",
+    name: "Sentinel MCP",
     version: "1.0.0"
 });
 
@@ -16,10 +16,10 @@ const API_BASE = process.env.API_BASE_URL || `http://localhost:${PORT}/api`;
 // --- Resources ---
 
 // 1. System Status
-// URI: autopilot://status
+// URI: sentinel://status
 server.resource(
     "system-status",
-    "autopilot://status",
+    "sentinel://status",
     async (uri) => {
         try {
             const response = await fetch(`${API_BASE}/status`);
@@ -218,7 +218,7 @@ server.tool(
 // 9. Trigger Manual Poll
 server.tool(
     "trigger_manual_poll",
-    "Force the Autopilot to check Jira for new tickets immediately.",
+    "Force the Sentinel to check Jira for new tickets immediately.",
     {},
     async () => {
         try {
@@ -236,7 +236,7 @@ server.tool(
 // 10. List Active Repos / Projects
 server.tool(
     "list_active_repos",
-    "List all Jira projects currently being monitored by the Autopilot.",
+    "List all Jira projects currently being monitored by the Sentinel.",
     {},
     async () => {
         try {

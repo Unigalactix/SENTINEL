@@ -742,18 +742,18 @@ async function applyCopilotFixes({ files = [], prompt = '' }) {
     return results;
 }
 
-// --- Polling Loop (Autopilot Mode) ---
+// --- Polling Loop (Sentinel Mode) ---
 async function startPolling() {
-    console.log('--- Starting Jira Autopilot Polling ---');
+    console.log('--- Starting Sentinel Polling ---');
 
     // On startup, reconcile open PRs across the org and resume monitoring
     async function reconcileActivePRsOnStartup() {
         try {
             const org = process.env.GHUB_ORG || 'Unigalactix';
-            console.log(`[Autopilot] Reconciling active PRs in org: ${org}`);
+            console.log(`[Sentinel] Reconciling active PRs in org: ${org}`);
             const prs = await getActiveOrgPRsWithJiraKeys({ org });
             if (!Array.isArray(prs) || prs.length === 0) {
-                console.log('[Autopilot] No open PRs with Jira keys found to reconcile.');
+                console.log('[Sentinel] No open PRs with Jira keys found to reconcile.');
                 return;
             }
             for (const pr of prs) {
@@ -795,16 +795,16 @@ async function startPolling() {
                     };
                     systemStatus.scanHistory.unshift(historyItem);
                     systemStatus.monitoredTickets.push(historyItem);
-                    console.log(`[Autopilot] Resumed monitoring PR ${pr.prUrl} for ticket ${issueKey}.`);
+                    console.log(`[Sentinel] Resumed monitoring PR ${pr.prUrl} for ticket ${issueKey}.`);
                     try {
                         await addComment(issueKey, `🔁 Server restarted: resuming monitoring for active PR\nPR: ${pr.prUrl}`);
                     } catch (_) { }
                 } catch (e) {
-                    console.warn(`[Autopilot] Failed to reconcile ${issueKey}: ${e.message}`);
+                    console.warn(`[Sentinel] Failed to reconcile ${issueKey}: ${e.message}`);
                 }
             }
         } catch (e) {
-            console.error('[Autopilot] Reconciliation error:', e.message);
+            console.error('[Sentinel] Reconciliation error:', e.message);
         }
     }
 
@@ -908,7 +908,7 @@ async function startPolling() {
                                 if (!isWorkInProgress) {
                                     // If it's a draft, we must undraft it before merging (using pulls.merge)
                                     if (subPr.draft) {
-                                        console.log(`[Autopilot] SubPR #${subPr.number} is Draft. Mark as Ready for Review...`);
+                                        console.log(`[Sentinel] SubPR #${subPr.number} is Draft. Mark as Ready for Review...`);
                                         await markPullRequestReadyForReview({ repoName: ticket.repoName, pullNumber: subPr.number });
                                         ticket.toolUsed = "Autopilot + Undraft"; // [NEW] Track tool usage
                                     } else {
@@ -916,7 +916,7 @@ async function startPolling() {
                                     }
 
                                     // [NEW] Auto-Approve the PR
-                                    console.log(`[Autopilot] Auto-approving SubPR #${subPr.number}...`);
+                                    console.log(`[Sentinel] Auto-approving SubPR #${subPr.number}...`);
                                     await approvePullRequest({ repoName: ticket.repoName, pullNumber: subPr.number });
 
                                     // Enable GitHub Auto-Merge on the sub PR
@@ -932,10 +932,10 @@ async function startPolling() {
                                             ticket.copilotMergedAt = new Date().toISOString();
                                         }
                                     } else {
-                                        console.log(`[Autopilot] ⚠️ Auto-merge enable failed for SubPR #${subPr.number}: ${autoRes.message}`);
+                                        console.log(`[Sentinel] ⚠️ Auto-merge enable failed for SubPR #${subPr.number}: ${autoRes.message}`);
 
                                         // Fallback: If Auto-Merge fails (e.g. "clean status" which implies ready, or not protected), try immediate merge
-                                        console.log(`[Autopilot] Attempting immediate merge for SubPR #${subPr.number} as fallback...`);
+                                        console.log(`[Sentinel] Attempting immediate merge for SubPR #${subPr.number} as fallback...`);
                                         const mergeRes = await mergePullRequest({ repoName: ticket.repoName, pullNumber: subPr.number, method: 'squash' });
                                         if (mergeRes.merged) {
                                             ticket.copilotMerged = true;
