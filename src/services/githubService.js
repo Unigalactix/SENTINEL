@@ -1,10 +1,60 @@
 const { Octokit } = require('@octokit/rest');
 require('dotenv').config();
 
-// Initialize Octokit with the token from .env
-const octokit = new Octokit({
-    auth: process.env.GHUB_TOKEN
-});
+// Try to load GitHub App auth (optional - falls back to PAT if unavailable)
+let createAppAuth = null;
+try {
+    createAppAuth = require('@octokit/auth-app').createAppAuth;
+} catch (e) {
+    console.log('[GitHub] @octokit/auth-app not installed. Using PAT authentication only.');
+}
+
+/**
+ * Initialize Octokit with GitHub App authentication (preferred) or PAT fallback.
+ * GitHub App provides:
+ * - Short-lived tokens (1 hour) vs long-lived PAT
+ * - Bot identity ("Sentinel [bot]") instead of personal account
+ * - Fine-grained permissions per repository
+ * - Multi-tenant support (each user installs the app)
+ */
+function createOctokitClient() {
+    const appId = process.env.GITHUB_APP_ID;
+    const privateKey = process.env.GITHUB_PRIVATE_KEY;
+    let installationId = process.env.GITHUB_INSTALLATION_ID;
+
+    // Extract numeric ID if URL was provided
+    if (installationId && installationId.includes('/')) {
+        const match = installationId.match(/\/(\d+)$/);
+        if (match) installationId = match[1];
+    }
+
+    // Use GitHub App if all credentials are provided
+    if (appId && privateKey && installationId) {
+        console.log('[GitHub] Using GitHub App authentication (App ID: ' + appId + ')');
+        return new Octokit({
+            authStrategy: createAppAuth,
+            auth: {
+                appId: appId,
+                privateKey: privateKey,
+                installationId: installationId,
+            },
+        });
+    }
+
+    // Fallback to Personal Access Token
+    if (process.env.GHUB_TOKEN) {
+        console.log('[GitHub] Using Personal Access Token (PAT) authentication');
+        return new Octokit({
+            auth: process.env.GHUB_TOKEN
+        });
+    }
+
+    // No authentication configured
+    console.warn('[GitHub] WARNING: No authentication configured! Set GITHUB_APP_ID + GITHUB_PRIVATE_KEY + GITHUB_INSTALLATION_ID or GHUB_TOKEN');
+    return new Octokit();
+}
+
+const octokit = createOctokitClient();
 
 /**
  * Generates a default Dockerfile content based on language.
