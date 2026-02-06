@@ -11,10 +11,11 @@ Software development involves many repetitive administrative steps: creating bra
 **The Analogy**
 Think of the Autopilot as a **Junior Developer who works 24/7**.
 1.  You assign them a task in Jira.
-2.  They immediately start working on it.
-3.  They write the initial code using AI guidance.
-4.  They submit their work for review.
-5.  If everything looks good (tests pass), they file it away and mark the task as "Done."
+2.  **They analyze the codebase and plan the fix (Agentic AI).**
+3.  They immediately start working on it.
+4.  They write the initial code using AI guidance.
+5.  They submit their work for review.
+6.  If everything looks good (tests pass), they file it away and mark the task as "Done."
 
 ---
 
@@ -28,7 +29,8 @@ To understand how the system works, let's follow a single task from start to fin
 
 ### Phase 2: Execution (The Creation)
 *   **System Action**: The Autopilot "reads" the ticket description to understand what needs to be built.
-*   **AI Integration**: It sends this description to the **AI Coder** (GitHub Copilot CLI) and says, "Please write code to solve this problem."
+*   **Agentic Analysis**: It scans the repository for **Secrets** and **Structure**, then uses Azure OpenAI to draft a "Fix Strategy."
+*   **AI Integration**: It sends this strategy to the **AI Coder** (GitHub Copilot CLI) and says, "Please write code to solve this problem."
 *   **Code Delivery**: The AI writes the code (e.g., HTML for the login form, CSS for styling).
 *   **Proposal**: The system packages this new code into a **Pull Request (PR)**. Think of a PR as a "Draft Proposal" that says, "Here is the code I wrote. Should we add it to the main project?"
 
@@ -85,7 +87,9 @@ We have built a visual **Dashboard** that runs in your web browser.
 While the logic is simple, the technology is robust.
 
 *   **Server (`server.js`)**: The "Brain" running in Node.js that coordinates everything.
-    *   **Intelligence**: Can optionally use `gh copilot` CLI to generate code fixes and custom CI workflows.
+    *   **Agentic AI**: Uses Azure OpenAI to plan fixes and specific workflows.
+    *   **Intelligence**: Can optionally use `gh copilot` CLI to generate code fixes.
+*   **LLM Service (`llmService.js`)**: The "Cognitive Engine" connecting to Azure OpenAI.
 *   **GitHub Service (`githubService.js`)**: The "Librarian" that knows how to speak to GitHub's complex API.
 *   **Jira Service (`jiraService.js`)**: The "Messenger" that translates code updates into business updates on Jira.
     *   **Dynamic Discovery**: Automatically fetches available projects via API, removing the need for manual configuration.

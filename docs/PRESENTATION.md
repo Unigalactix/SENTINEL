@@ -137,10 +137,11 @@ graph LR
    - Dockerfiles for containerized deployments
    - Feature branches with proper naming conventions
 
-4. **AI Integration** ✨ (Optional)
-   - GitHub Copilot for code fixes
-   - Custom workflow generation
-   - Sub-PR management and auto-merging
+4. **Agentic AI (Azure OpenAI)** ✨
+   - **Secret Discovery**: Detects available credentials (`AZURE_...`)
+   - **Repo Summarization**: Understands project context
+   - **Fix Planning**: Devises "Fix Strategy" before acting
+   - **Custom Workflows**: Generates tailored YAML based on secrets
 
 5. **Continuous Reporting** 📊
    - Live dashboard (http://localhost:3000)
@@ -181,13 +182,14 @@ graph TD
         JIRA[Jira Cloud API]
         GITHUB[GitHub API]
         ACR[Azure Container Registry]
-        COPILOT[GitHub Copilot CLI]
+        AZURE_OPENAI[Azure OpenAI]
     end
     
     subgraph "Autopilot Core"
         SERVER[server.js<br/>Main Engine]
         JIRA_SVC[jiraService.js<br/>Jira Integration]
         GH_SVC[githubService.js<br/>GitHub Integration]
+        LLM_SVC[llmService.js<br/>Cognitive Engine]
         MCP[mcpServer.js<br/>AI Interface]
     end
     
@@ -199,14 +201,15 @@ graph TD
     SERVER -->|30s Poll| JIRA_SVC
     JIRA_SVC <-->|REST API| JIRA
     SERVER --> GH_SVC
+    SERVER <-->|Plan Fix| LLM_SVC
+    LLM_SVC <-->|Chat Completion| AZURE_OPENAI
     GH_SVC <-->|REST API| GITHUB
-    SERVER -.->|Optional| COPILOT
+    GH_SVC <-->|List Secrets| GITHUB
     GH_SVC <-->|Docker Push| ACR
     SERVER --> DASH
     MCP <--> AI_CLIENT
     MCP --> JIRA_SVC
     MCP --> GH_SVC
-```
 
 ##### 📊 Key Architectural Decisions
 
@@ -388,16 +391,15 @@ Total: < 10 minutes of setup time
 
 **When AI is Enabled (`USE_GH_COPILOT=true`):**
 
-**Feature 1: Intelligent Code Fixes**
+**Feature 1: Agentic Fix Planning**
 ```javascript
 // Autopilot reads the Jira ticket description:
-"Create a REST API endpoint for user authentication"
+"Create a REST API endpoint"
 
-// Then prompts GitHub Copilot:
-gh copilot suggest -t shell "Create a Node.js Express endpoint 
-for POST /api/auth/login that validates username and password"
-
-// Result: Auto-generated code committed to PR
+// 1. Lists Secrets: Found AZURE_CREDENTIALS
+// 2. Summarizes Repo: Node.js Express App
+// 3. Plans Fix: "Add POST route to /api/auth..."
+// 4. Posts Analysis to Jira for review
 ```
 
 **Feature 2: Custom Workflow Generation**

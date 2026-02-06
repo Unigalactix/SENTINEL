@@ -12,8 +12,9 @@ The agent operates on a continuous feedback loop:
 1.  **Poll**: Fetches tickets from Jira (Dynamically discovered projects).
 2.  **Prioritize**: Sorts tickets by Priority (Highest → Lowest).
 3.  **Process**: Picks the top ticket and moves it to **"In Progress"**.
-4.  **Execute**: Performs Repo Analysis, Artifact Generation, and PR Creation.
-5.  **Report**:
+4.  **Agentic Analysis**: Uses Azure OpenAI to discover secrets, summarize the repo, and plan the fix.
+5.  **Execute**: Generates Custom Workflow (if needed) or creates Pull Request.
+6.  **Report**:
     -   **Success**: Comments with PR Link → Transitions to **"Done"**.
     -   **Failure**: Comments with Error Log → Transitions to **"To Do"**.
 
@@ -51,7 +52,27 @@ The agent determines how to build/test a project using this strict precedence or
 
 ---
 
-## 2. Model Context Protocol (MCP) Interface
+## 2. Azure OpenAI Integration (Agentic Code)
+**Module**: `src/services/llmService.js`
+**Role**: Cognitive Engine
+
+The agent uses Azure OpenAI to "reason" about the task before execution.
+
+### Capabilities
+1.  **Repo Summarization**: `summarizeRepo()` - Reads file structure and README.
+2.  **Fix Planning**: `planFix()` - Correlates Jira ticket with Repo Summary.
+3.  **Workflow Generation**: `generateDraftWorkflow()` - Creates YAML based on the plan and **Available Secrets**.
+
+### Configuration via `.env`
+```env
+LLM_API_KEY=...
+LLM_ENDPOINT=...
+LLM_DEPLOYEMENT_NAME=...
+```
+
+---
+
+## 3. Model Context Protocol (MCP) Interface
 **Runtime**: Node.js (`mcpServer.js`)
 **Role**: AI Interoperability Layer
 

@@ -26,6 +26,7 @@ flowchart LR
     subgraph "Automation Server"
         Agent[fa:fa-cogs Jira Git<br/>Automation Agent]:::plain
         Dash[fa:fa-tachometer-alt Dashboard<br/>Monitoring]:::plain
+        LLM[fa:fa-brain Azure OpenAI<br/>Cognitive Engine]:::azure
     end
 
     subgraph "GitHub Ecosystem"
@@ -44,6 +45,7 @@ flowchart LR
     User -->|Creates Ticket| JiraNode
     JiraNode <-->|Webhook / Trigger| Agent
     Agent -->|Update Metrics| Dash
+    Agent <-->|Analyze & Plan| LLM
     
     Agent <-->|Push Code / PR| GH
     GH <-->|Context / Suggestion| Copilot
@@ -91,17 +93,19 @@ graph TD
         JiraFetch -->|Tickets Found| Validation
         Validation -->|Invalid schema| LogSkip[⚠️ Log warning & Skip]
         Validation -->|Valid| ProjectDetect
+        
+        ProjectDetect --> AgenticPhase[🧠 Agentic AI Analysis]
     end
 
     JiraState -.->|Read| JiraFetch
     class Start,UserAction actor;
-    class PollTimer,Validation,ProjectDetect process;
+    class PollTimer,Validation,ProjectDetect,AgenticPhase process;
     class LogFetchError,LogSkip failure;
 
     %% =========================================================================
     %% PHASE 2: GENERATION (AI & Git)
     %% =========================================================================
-    ProjectDetect --> CheckAI{🧠 AI Enabled?}
+    AgenticPhase --> CheckAI{🧠 Agentic/AI Enabled?}
     
     CheckAI -->|No| TemplateGen[📄 Load Static Template]
     CheckAI -->|Yes| CopilotPrompt[🤖 GitHub Copilot CLI]
@@ -186,6 +190,11 @@ graph TD
     *   **Project Detection**: Reads the detected repository to identify the tech stack (e.g., `package.json` for Node, `pom.xml` for Java).
     *   **Requirement Parsing**: Extracts key requirements from the Jira ticket description.
 3.  **Validation**: Ensures the ticket has necessary metadata (Repo URL, etc.). If missing, it logs a warning and skips processing to prevent crashing.
+4.  **Agentic Analysis (Azure OpenAI)**:
+    *   **Secret Discovery**: Fetches list of available secrets from the repository.
+    *   **Repo Summarization**: Describes the repository context.
+    *   **Fix Planning**: Generates a high-level plan to address the ticket.
+    *   **Feedback**: Posts a comment to Jira with the analysis results.
 
 ### Phase 2: Execution & Code Generation (GitHub Copilot)
 1.  **AI Orchestration via GitHub Copilot (Optional)**: If `USE_GH_COPILOT=true`, the system constructs a prompt containing the ticket requirements and feeds it to the GitHub Copilot CLI.

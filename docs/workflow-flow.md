@@ -19,7 +19,8 @@ flowchart TD
     S1[Poll Jira for To Do]
     S2[Process Ticket Data]
     S3[Analyze Repo & Detect Language]
-    S4[Generate Workflow YAML]
+    S3A[Agentic AI: Plan Fix & List Secrets]
+    S4[Generate Workflow YAML (Custom/Template)]
     S5[Ensure Feature Branch]
     S6["Upsert Files (Workflow / Dockerfile)"]
     S7[Create or Reuse PR]
@@ -53,7 +54,7 @@ flowchart TD
   end
 
   %% Main happy path
-  J1 -->|Autopilot poll| S1 --> S2 --> S3 --> S4 --> S5 --> S6 --> S7 --> G1
+  J1 -->|Autopilot poll| S1 --> S2 --> S3 --> S3A --> S4 --> S5 --> S6 --> S7 --> G1
   S2 -->|Transition| J2
   S7 -->|Comment PR| S8 --> G2
   G1 -->|Triggers| A1 --> A2 --> A3

@@ -8,9 +8,13 @@ A comprehensive Node.js automation service that bridges Jira and GitHub. It acts
 
 -   **Autopilot Polling**: Automatically polls Jira every 30 seconds for new tickets.
 -   **Dynamic Project Discovery**: Automatically detects all available Jira projects (no need to hardcode keys).
+-   **Agentic AI (Azure OpenAI)**: The system now possesses cognitive capabilities:
+    -   **Secret Discovery**: Automatically detects available GitHub Secrets (`AZURE_CREDENTIALS`, etc.).
+    -   **Repo Summarization**: Reads and understands your codebase structure and README.
+    -   **Fix Planning**: Analyzes Jira tickets against repo context to devise a specific "Fix Strategy".
+    -   **Custom Workflows**: Generates tailored GitHub Actions workflows based on the strategy and available secrets.
 -   **AI-Powered agent (Optional)**: Enable `USE_GH_COPILOT=true` to unlock:
     -   **AI Code Fixes**: Automatically applies code fixes tailored to Jira requirements before PR.
-    -   **AI Workflow Generation**: Generates custom CI/CD pipelines instead of static templates.
     -   **Sub-PR Management**: Detects, un-drafts, and auto-merges Pull Requests created by `@copilot`.
 -   **Smart Language Detection**: Automatically parsing repository files to detect the tech stack:
     -   `package.json` → **Node.js**
