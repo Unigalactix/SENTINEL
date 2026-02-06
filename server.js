@@ -140,11 +140,73 @@ app.post('/api/poll', (req, res) => {
     // Actually, let's just expose a global emitter or a simpler way?
     // For now, let's just log it. Real implementation would require refactoring startPolling.
     // WAIT! We can move 'poll' to outer scope or attach it to app.
-    if (global.forcePoll) {
+    // Expose forcePoll appropriately
+    if (global.forcePoll && typeof global.forcePoll === 'function') {
         global.forcePoll();
-        res.json({ message: 'Poll triggered' });
+        return res.json({ message: 'Poll triggered successfully' });
     } else {
-        res.status(503).json({ message: 'Poll function not ready' });
+        console.warn('[API] Poll function not ready or not exposed.');
+        // Try to trigger it by resetting nextScanTime if systemStatus is available
+        if (systemStatus) {
+            systemStatus.nextScanTime = Date.now();
+            return res.json({ message: 'Poll scheduled immediately (via timer reset)' });
+        }
+        return res.status(503).json({ message: 'Poll function not ready' });
+    }
+});
+
+// --- API for Config (Secrets) ---
+app.post('/api/config', (req, res) => {
+    const secrets = req.body; // Expect { JIRA_BASE_URL: "...", ... }
+
+    if (!secrets || Object.keys(secrets).length === 0) {
+        return res.status(400).json({ error: 'No configuration provided' });
+    }
+
+    try {
+        const envPath = path.join(__dirname, '.env');
+        let envContent = '';
+
+        // Read existing .env if it exists
+        if (fs.existsSync(envPath)) {
+            envContent = fs.readFileSync(envPath, 'utf8');
+        }
+
+        const lines = envContent.split('\n');
+        const newLines = [];
+        const keysUpdated = new Set();
+
+        // Update existing keys
+        lines.forEach(line => {
+            const match = line.match(/^([^=]+)=(.*)$/);
+            if (match) {
+                const key = match[1].trim();
+                if (secrets[key] !== undefined) {
+                    newLines.push(`${key}="${secrets[key]}"`); // wrap in quotes for safety
+                    keysUpdated.add(key);
+                } else {
+                    newLines.push(line);
+                }
+            } else {
+                newLines.push(line);
+            }
+        });
+
+        // Append new keys
+        Object.keys(secrets).forEach(key => {
+            if (!keysUpdated.has(key)) {
+                newLines.push(`${key}="${secrets[key]}"`);
+            }
+            // Update process.env in memory immediately
+            process.env[key] = secrets[key];
+        });
+
+        fs.writeFileSync(envPath, newLines.join('\n'));
+        console.log('[Config] Secrets updated and saved to .env');
+        res.json({ message: 'Configuration saved successfully' });
+    } catch (e) {
+        console.error('[Config] Failed to save .env:', e);
+        res.status(500).json({ error: `Failed to save config: ${e.message}` });
     }
 });
 
@@ -750,6 +812,12 @@ async function startPolling() {
         try {
             if (systemStatus.paused) {
                 // If paused, just update next scan time to keep UI alive but don't scan
+                // [FIX] Don't overwrite status if we are manually inspecting
+                if (systemStatus.currentTicketKey && systemStatus.currentTicketKey.startsWith('INSPECT:')) {
+                    setTimeout(poll, POLL_INTERVAL_MS);
+                    return;
+                }
+
                 systemStatus.currentPhase = 'Paused';
                 systemStatus.currentTicketKey = 'PAUSED';
                 systemStatus.nextScanTime = Date.now() + POLL_INTERVAL_MS;

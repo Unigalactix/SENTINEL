@@ -10,7 +10,8 @@ const server = new McpServer({
     version: "1.0.0"
 });
 
-const API_BASE = 'http://localhost:3000/api';
+const PORT = process.env.PORT || 3000;
+const API_BASE = process.env.API_BASE_URL || `http://localhost:${PORT}/api`;
 
 // --- Resources ---
 

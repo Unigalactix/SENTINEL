@@ -751,6 +751,111 @@
                 min-height: auto;
             }
         }
+
+        /* --- Secrets Sidebar --- */
+        .sidebar-overlay {
+            position: fixed;
+            top: 0;
+            right: 0;
+            bottom: 0;
+            left: 0;
+            background: rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(2px);
+            z-index: 1000;
+            display: none;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+
+        .sidebar-overlay.active {
+            opacity: 1;
+        }
+
+        .secrets-sidebar {
+            position: absolute;
+            top: 0;
+            right: -400px;
+            width: 350px;
+            height: 100%;
+            background: #1e1e1e;
+            border-left: 1px solid #333;
+            box-shadow: -10px 0 30px rgba(0, 0, 0, 0.5);
+            transition: right 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+            display: flex;
+            flex-direction: column;
+            z-index: 1001;
+        }
+
+        .sidebar-overlay.active .secrets-sidebar {
+            right: 0;
+        }
+
+        .sidebar-header {
+            padding: 1.5rem;
+            border-bottom: 1px solid #333;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: #252526;
+        }
+
+        .sidebar-header h3 {
+            margin: 0;
+            font-size: 1.1rem;
+            color: #fff;
+        }
+
+        .sidebar-content {
+            flex: 1;
+            padding: 1.5rem;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+        }
+
+        .secret-group {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .secret-label {
+            font-size: 0.85rem;
+            font-weight: 500;
+            color: #ccc;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .secret-input {
+            background: #2d2d2d;
+            border: 1px solid #444;
+            border-radius: 6px;
+            padding: 10px;
+            color: #e2e8f0;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.85rem;
+            width: 100%;
+            box-sizing: border-box;
+            transition: border-color 0.2s;
+        }
+
+        .secret-input:focus {
+            outline: none;
+            border-color: var(--primary);
+        }
+
+        .secret-input::placeholder {
+            color: #666;
+            font-style: italic;
+        }
+
+        .sidebar-footer {
+            padding: 1.5rem;
+            border-top: 1px solid #333;
+            background: #252526;
+        }
     </style>
 </head>
 
@@ -769,10 +874,11 @@
                 Autopilot Monitor
             </div>
             <div style="display: flex; gap: 1rem; align-items: center;">
-                <button id="btnPause" class="btn btn-small"
-                    style="background: rgba(255,165,0,0.2); color: orange; border: 1px solid orange;"
-                    onclick="togglePause()">
+                <button id="btnPause" class="btn btn-outline-warning" onclick="togglePause()">
                     ⏸ Pause
+                </button>
+                <button id="btnPoll" class="btn btn-outline-secondary" onclick="triggerPoll()" title="Force Poll Now">
+                    🔄 Poll
                 </button>
                 <div class="timer-badge">
                     <span id="phaselabel">WAITING</span>
@@ -917,6 +1023,52 @@
                     <span class="count-badge" id="count-cd">0</span>
                 </div>
                 <div id="col-cd"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Secrets Sidebar -->
+    <div id="secretsSidebar" class="sidebar-overlay" onclick="closeSecretsSidebar(event)">
+        <div class="secrets-sidebar" onclick="event.stopPropagation()">
+            <div class="sidebar-header">
+                <h3>🔒 Client Secrets</h3>
+                <button onclick="closeSecretsSidebar()" class="btn-close">×</button>
+            </div>
+            <div class="sidebar-content">
+                <div class="secret-group">
+                    <label class="secret-label">Jira Base URL</label>
+                    <input type="text" class="secret-input" id="cfg_JIRA_BASE_URL"
+                        placeholder="https://your-domain.atlassian.net">
+                </div>
+                <div class="secret-group">
+                    <label class="secret-label">Jira Email</label>
+                    <input type="email" class="secret-input" id="cfg_JIRA_EMAIL" placeholder="user@example.com">
+                </div>
+                <div class="secret-group">
+                    <label class="secret-label">Jira API Token</label>
+                    <input type="password" class="secret-input" id="cfg_JIRA_API_TOKEN" placeholder="ATATT3xFfGF0...">
+                </div>
+                <hr style="border:0; border-top:1px solid #333; margin:0.5rem 0;">
+                <div class="secret-group">
+                    <label class="secret-label">GitHub Token</label>
+                    <input type="password" class="secret-input" id="cfg_GHUB_TOKEN" placeholder="ghp_...">
+                </div>
+                <div class="secret-group">
+                    <label class="secret-label">GitHub Organization</label>
+                    <input type="text" class="secret-input" id="cfg_GHUB_ORG" placeholder="e.g. Unigalactix">
+                </div>
+                <hr style="border:0; border-top:1px solid #333; margin:0.5rem 0;">
+                <div class="secret-group">
+                    <label class="secret-label">Azure SaaS / LLM Key <span
+                            style="font-size:0.7em; color:var(--primary);">(Agentic)</span></label>
+                    <input type="password" class="secret-input" id="cfg_LLM_API_KEY" placeholder="Azure OpenAI Key...">
+                </div>
+            </div>
+            <div class="sidebar-footer">
+                <button class="btn btn-primary" onclick="saveSecrets()"
+                    style="width:100%; justify-content:center; background:var(--primary); color:white;">
+                    Save Configuration
+                </button>
             </div>
         </div>
     </div>
@@ -1191,6 +1343,65 @@
             }
         }
 
+        async function saveSecrets() {
+            const inputs = document.querySelectorAll('.secret-input');
+            const secrets = {};
+            inputs.forEach(input => {
+                const key = input.id.replace('cfg_', '');
+                if (input.value.trim()) {
+                    secrets[key] = input.value.trim();
+                }
+            });
+
+            if (Object.keys(secrets).length === 0) {
+                alert("Please enter at least one secret to save.");
+                return;
+            }
+
+            try {
+                const btn = document.querySelector('#secretsSidebar .btn-primary');
+                const originalText = btn.innerText;
+                btn.innerText = "Saving...";
+                btn.disabled = true;
+
+                const res = await fetch('/api/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(secrets)
+                });
+
+                if (res.ok) {
+                    playTone('success');
+                    btn.innerText = "Saved!";
+                    setTimeout(() => {
+                        btn.innerText = originalText;
+                        btn.disabled = false;
+                        closeSecretsSidebar();
+                    }, 1000);
+                } else {
+                    const data = await res.json();
+                    alert("Failed to save: " + data.error);
+                    btn.innerText = originalText;
+                    btn.disabled = false;
+                }
+            } catch (e) {
+                console.error("Save failed", e);
+                alert("Error saving configuration");
+            }
+        }
+
+        async function triggerPoll() {
+            try {
+                playTone('click');
+                const res = await fetch('/api/poll', { method: 'POST' });
+                const data = await res.json();
+                console.log(data.message);
+                // Visual feedback could be added here
+            } catch (e) {
+                console.error("Poll trigger failed", e);
+            }
+        }
+
         function updatePauseButtonUI() {
             const btn = document.getElementById('btnPause');
             if (isSystemPaused) {
@@ -1327,6 +1538,21 @@
         fetchStatus();
 
         // Start MCP Inspector
+
+        // --- Secrets Sidebar Logic ---
+        function toggleSecretsSidebar() {
+            const el = document.getElementById('secretsSidebar');
+            el.style.display = 'block';
+            setTimeout(() => el.classList.add('active'), 10);
+            playTone('click');
+        }
+
+        function closeSecretsSidebar(e) {
+            if (e && e.target !== e.currentTarget) return; // Allow clicking overlay to close
+            const el = document.getElementById('secretsSidebar');
+            el.classList.remove('active');
+            setTimeout(() => el.style.display = 'none', 400);
+        }
 
     </script>
 </body>

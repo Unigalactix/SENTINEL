@@ -1492,6 +1492,29 @@ async function listRepoSecrets(repoName) {
     }
 }
 
+/**
+ * Lists all branches in the repository.
+ * @param {string} repoName 
+ * @returns {Promise<Array<{name: string, protected: boolean}>>}
+ */
+async function listBranches(repoName) {
+    const [owner, repo] = repoName.split('/');
+    try {
+        const { data } = await octokit.repos.listBranches({
+            owner,
+            repo,
+            per_page: 100 // Limit to 100 for now
+        });
+        return data.map(b => ({
+            name: b.name,
+            protected: b.protected
+        }));
+    } catch (error) {
+        console.error(`Failed to list branches for ${repoName}:`, error.message);
+        return [];
+    }
+}
+
 module.exports = {
     generateWorkflowFile,
     createPullRequestForWorkflow,
@@ -1514,6 +1537,12 @@ module.exports = {
     getActiveOrgPRsWithJiraKeys,
     getRepoRootFiles,
     getRepoFileContent,
-    listRepoSecrets
+    listRepoSecrets,
+    listAccessibleRepos,
+    checkRepoAccess,
+    getRepoDirectoryFiles,
+    listRepoWorkflows,
+    getReleases,          // [NEW]
+    getBranchProtection,   // [NEW] - Also likely needed by devopsChecks
+    listBranches          // [NEW]
 };
-

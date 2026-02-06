@@ -6,8 +6,10 @@ const {
     getRepoDirectoryFiles,
     listAccessibleRepos,
     getRepoFileContent,
-    listRepoWorkflows
+    listRepoWorkflows,
+    listBranches // [NEW]
 } = require('../src/services/githubService');
+const llmService = require('../src/services/llmService');
 const { runDevOpsScan } = require('../src/services/devopsChecks');
 const {
     createIssue,
@@ -219,18 +221,41 @@ async function processRepo(repoName, autoFix = false, logger = console.log) {
 
         const payload = `Payload:\n- Language: ${detectedLanguage}\n- Build: ${buildCmd}\n- Test: ${testCmd}`;
 
-        // 2. Build Composite Description
-        // We use a simple plain text format that Jira's ADF adapter (in updateIssue/createIssue) handles as a single paragraph.
-        // To make it readable, we use newlines.
-        let fullDescription = `Repository Inspection Results for ${repoName}\n\n`;
-        fullDescription += `The following issues were detected during the automated health scan:\n\n`;
+        // 1.5 Fetch Branch Info
+        log('   🌿 Fetching branch structure...');
+        const branches = await listBranches(repoName);
+        log(`   Found ${branches.length} branches.`);
 
-        findings.forEach((f, idx) => {
-            fullDescription += `${idx + 1}. ${f.summary}\n`;
-            fullDescription += `   ${f.description}\n\n`;
-        });
+        // 2. Generate Report (LLM or Static Fallback)
+        let fullDescription = "";
 
-        fullDescription += `----\n${payload}`;
+        log('   🤖 Asking AI to generate Audit Report...');
+
+        // Get README content for context (reuse if already fetched, or fetch now)
+        let readmeContent = "";
+        const readmeFile = rootFiles.find(f => f.toLowerCase().startsWith('readme'));
+        if (readmeFile) {
+            readmeContent = await getRepoFileContent(repoName, readmeFile);
+        }
+
+        const llmReport = await llmService.analyzeInspectionResults(repoName, readmeContent, findings, branches);
+
+        if (llmReport) {
+            fullDescription = llmReport;
+            // Append payload at the end for machine readablity if needed, or trust the human report
+            fullDescription += `\n\n----\n${payload}`;
+            log('   ✅ AI Report Generated.');
+        } else {
+            log('   ⚠️ AI Generation failed. Using static template.');
+            // Fallback to static
+            fullDescription = `Repository Inspection Results for ${repoName}\n\n`;
+            fullDescription += `The following issues were detected during the automated health scan:\n\n`;
+            findings.forEach((f, idx) => {
+                fullDescription += `${idx + 1}. ${f.summary}\n`;
+                fullDescription += `   ${f.description}\n\n`;
+            });
+            fullDescription += `----\n${payload}`;
+        }
 
         const ticketSummary = `Repo Health Remediation: ${repoName}`;
 
