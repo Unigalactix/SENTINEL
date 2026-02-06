@@ -20,9 +20,11 @@ const {
     enablePullRequestAutoMerge,
     isPullRequestMerged,
     approvePullRequest,
-    getActiveOrgPRsWithJiraKeys
+    getActiveOrgPRsWithJiraKeys,
+    listRepoSecrets // [NEW]
 } = require('./src/services/githubService');
 const { getPendingTickets, transitionIssue, addComment, getIssueDetails } = require('./src/services/jiraService');
+const llmService = require('./src/services/llmService'); // [NEW]
 require('dotenv').config();
 
 // Load optional per-board POST_PR_STATUS mapping
@@ -436,6 +438,42 @@ async function processTicketData(issue) {
         }
     }
 
+    // --- AGENTIC AI ANALYSIS ---
+    let repoSummary = 'Analysis not available.';
+    let fixStrategy = null;
+    let availableSecrets = [];
+
+    try {
+        logProgress(`[Agentic] Listing repository secrets...`);
+        availableSecrets = await listRepoSecrets(repoName);
+        logProgress(`[Agentic] Found secrets: ${availableSecrets.join(', ') || 'None'}`);
+
+        logProgress(`[Agentic] content analyzing repo...`);
+        // We need a file listing and README for summary. 
+        // We can reuse getRepoInstructions logic or just list files.
+        // For efficiency, let's just pass the file list we might have or fetch root.
+        const { getRepoRootFiles, getRepoFileContent } = require('./src/services/githubService');
+        const files = await getRepoRootFiles(repoName);
+        const readme = await getRepoFileContent(repoName, 'README.md');
+
+        repoSummary = await llmService.summarizeRepo(files.join('\n'), readme);
+        logProgress(`[Agentic] Repo Summary generated.`);
+
+        logProgress(`[Agentic] Planning fix for ${issueKey}...`);
+        fixStrategy = await llmService.planFix(ticketData, repoSummary);
+        logProgress(`[Agentic] Fix Strategy generated.`);
+
+        // Post Analysis to Jira
+        if (issueKey) {
+            const analysisComment = `🤖 **AI Agent Analysis**\n\n**Repository**: ${repoName}\n${repoSummary}\n\n**Secrets Found**: ${availableSecrets.length ? availableSecrets.join(', ') : 'None detected'}\n\n**Fix Strategy**:\n${fixStrategy}`;
+            await addComment(issueKey, analysisComment);
+        }
+
+    } catch (e) {
+        console.error('[Agentic] Analysis failed:', e);
+        logProgress(`[Agentic] Analysis failed: ${e.message}`);
+    }
+
     // Default commands based on language (if not specified)
     // Priority: Jira Field > Repo Instructions (MD) > Repo Config (Code) > Language Default
     let buildCommand = ticketData.customfield_build || repoInstructions.buildCommand || repoConfig.buildCommand || ticketData.buildCommand;
@@ -524,6 +562,17 @@ async function processTicketData(issue) {
             logProgress(`Generating ${language} workflow for ${repoName}...`);
             workflowYml = generateWorkflowFile({ language, repoName, buildCommand, testCommand, deployTarget, defaultBranch });
         }
+
+        // [NEW] Agentic Workflow Generation Override
+        if (fixStrategy && process.env.LLM_API_KEY) {
+            logProgress(`[Agentic] Generating custom workflow based on strategy...`);
+            const customWorkflow = await llmService.generateDraftWorkflow(fixStrategy, language, { buildCommand, testCommand, deployTarget }, availableSecrets);
+            if (customWorkflow) {
+                workflowYml = customWorkflow;
+                logProgress(`[Agentic] Using LLM-generated workflow.`);
+            }
+        }
+
         systemStatus.currentPayload = workflowYml;
 
         // 3. Create Pull Request (with detailed logs inside githubService -> or we log steps here)

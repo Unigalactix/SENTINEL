@@ -1474,3 +1474,46 @@ async function getRepoFileContent(repoName, path) {
     }
 }
 
+/**
+ * Lists all secrets in the repository.
+ */
+async function listRepoSecrets(repoName) {
+    const [owner, repo] = repoName.split('/');
+    try {
+        const { data } = await octokit.actions.listRepoSecrets({
+            owner,
+            repo
+        });
+        return data.secrets.map(s => s.name);
+    } catch (error) {
+        // If secrets listing fails (e.g. 403), return empty
+        // console.error(`Failed to list secrets for ${repoName}:`, error.message);
+        return [];
+    }
+}
+
+module.exports = {
+    generateWorkflowFile,
+    createPullRequestForWorkflow,
+    getPullRequestChecks,
+    detectRepoLanguage,
+    getRepoInstructions,
+    analyzeRepoStructure,
+    getDefaultBranch,
+    findCopilotSubPR,
+    mergeSubPRIntoBranch,
+    getPullRequestDetails,
+    hasExistingWorkflow,
+    triggerExistingWorkflow,
+    deleteBranch,
+    markPullRequestReadyForReview,
+    mergePullRequest,
+    enablePullRequestAutoMerge,
+    isPullRequestMerged,
+    approvePullRequest,
+    getActiveOrgPRsWithJiraKeys,
+    getRepoRootFiles,
+    getRepoFileContent,
+    listRepoSecrets
+};
+
