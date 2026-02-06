@@ -648,7 +648,8 @@ async function processTicketData(issue) {
             deployTarget, // Pass deploy target for Dockerfile generation logic
             defaultBranch,
             repoConfig, // [NEW] Pass deep analysis results
-            ticketData: { ...ticketData, buildCommand, testCommand }
+            ticketData: { ...ticketData, buildCommand, testCommand },
+            aiAnalysis: { fixStrategy, repoSummary, availableSecrets } // [NEW] AI context for PR comments
         });
 
         systemStatus.currentPrUrl = result.prUrl;

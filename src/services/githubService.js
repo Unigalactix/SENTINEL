@@ -128,7 +128,6 @@ function generateWorkflowFile({ language, repoName, buildCommand, testCommand, d
 
     const securityJob = `  # -------------------------------------------------
     # JOB 2: SECURITY SCANS
-    # -------------------------------------------------
     security-scan:
         runs-on: ubuntu-latest
         needs: build
@@ -154,7 +153,6 @@ function generateWorkflowFile({ language, repoName, buildCommand, testCommand, d
     if (deployTarget === 'docker') {
         dockerJob = `  # -------------------------------------------------
     # JOB 3: DOCKER BUILD & PUSH
-    # -------------------------------------------------
     docker-build:
         runs-on: ubuntu-latest
         needs: [build, security-scan]
@@ -191,7 +189,6 @@ function generateWorkflowFile({ language, repoName, buildCommand, testCommand, d
     if (deployTarget === 'azure-webapp') {
         deployJob = `  # -------------------------------------------------
     # JOB 4: DEPLOYMENT
-    # -------------------------------------------------
     deploy:
         runs-on: ubuntu-latest
         needs: [build, security-scan]
@@ -229,9 +226,7 @@ env:
     TEST_COMMAND: ${testCommand}
     CODEQL_LANGUAGE: ${codeqlLang}
 jobs:
-    # -------------------------------------------------
     # JOB 1: BUILD & TEST
-    # -------------------------------------------------
     build:
         runs-on: ubuntu-latest
         steps:
@@ -377,156 +372,58 @@ async function createWorkflowPR({ owner, repo, featureBranch, defaultBranch, tit
 
 /**
  * Generates the Copilot Prompt (Comment Body).
+ * Uses context-aware prompts with secret placeholders instead of hardcoded YAML.
  */
-function generateCopilotPrompt({ issueKey, summary, description, repoConfig, repoName, defaultBranch, language }) {
+function generateCopilotPrompt({ issueKey, summary, description, repoConfig, repoName, defaultBranch, language, fixStrategy, hasExistingWorkflow, availableSecrets }) {
+    // Build secret placeholder list (never expose actual values)
+    const secretPlaceholders = availableSecrets?.length
+        ? availableSecrets.map(s => `\${{ secrets.${s} }}`).join(', ')
+        : 'None configured';
 
-    // Map Dynamic Variables
-    const REPO_NAME = repoName;
-    const DEFAULT_BRANCH = defaultBranch;
-    const BUILD_COMMAND = repoConfig && repoConfig.buildCommand ? repoConfig.buildCommand : 'npm run build';
-    const TEST_COMMAND = repoConfig && repoConfig.testCommand ? repoConfig.testCommand : 'npm test';
+    // Build command context
+    const buildCommand = repoConfig?.buildCommand || 'npm run build';
+    const testCommand = repoConfig?.testCommand || 'npm test';
 
-    // CodeQL Language Mapping
-    let CODEQL_LANGUAGE = 'javascript';
-    if (language === 'python') CODEQL_LANGUAGE = 'python';
-    if (language === 'dotnet') CODEQL_LANGUAGE = 'csharp';
-    if (language === 'java') CODEQL_LANGUAGE = 'java';
+    // Conditional workflow guidance
+    const workflowGuidance = hasExistingWorkflow
+        ? `> **Note:** This repository already has a CI/CD workflow. Review and enhance it if the task requires.`
+        : `> **Action Required:** Create a new CI/CD workflow file at \`.github/workflows/ci.yml\` if needed for this task.`;
 
-    return `@copilot /fix This issue **${issueKey}: ${summary}**
+    return `@copilot /fix **${issueKey}: ${summary}**
 
 ${description || ''}
 
-Read the whole repository first
-        & then please generate a CI / CD pipeline file based on this repo using the format below(ignore if already exists and working):
-    \`\`\`yaml
-name: CI Pipeline - ${REPO_NAME}
+---
 
-on:
-  push:
-    branches: ["main"]
-  pull_request:
-    branches: ["main"]
- 
-env:
-  CI: true
-  BUILD_COMMAND: npm run build
-  TEST_COMMAND: npm test
-  CODEQL_LANGUAGE: javascript
- 
-jobs:
- 
-  # -------------------------------------------------
-  # JOB 1: BUILD & TEST
-  # -------------------------------------------------
-  build:
-    runs-on: ubuntu-latest
- 
-    steps:
-      - name: Checkout source
-        uses: actions/checkout@v4
- 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
- 
-      - name: Install dependencies
-        run: npm ci
- 
-      - name: Build
-        run: \${{ env.BUILD_COMMAND }}
- 
-      - name: Test
-        run: \${{ env.TEST_COMMAND }}
- 
-  # -------------------------------------------------
-  # JOB 2: SECURITY SCANS
-  # -------------------------------------------------
-  security-scan:
-    runs-on: ubuntu-latest
-    permissions:
-      security-events: write
-      actions: read
-      contents: read
- 
-    steps:
-      - uses: actions/checkout@v4
- 
-      - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3
-        with:
-          languages: \${{ env.CODEQL_LANGUAGE }}
- 
-      - name: Autobuild
-        uses: github/codeql-action/autobuild@v3
- 
-      - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v3
- 
-  # -------------------------------------------------
-  # JOB 3: DOCKER BUILD & PUSH
-  # -------------------------------------------------
-  docker-build:
-    runs-on: ubuntu-latest
-    needs: [build, security-scan]
- 
-    steps:
-      - uses: actions/checkout@v4
- 
-      - name: Compute lowercase repo name
-        run: |
-          echo "REPO_LOWER=$(echo '\${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
- 
-      - name: Login to ACR
-        uses: docker/login-action@v3
-        with:
-          registry: \${{ secrets.ACR_LOGIN_SERVER }}
-          username: \${{ secrets.ACR_USERNAME }}
-          password: \${{ secrets.ACR_PASSWORD }}
- 
-      - name: Build and push image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: true
-          tags: |
-            \${{ secrets.ACR_LOGIN_SERVER }}/\${{ env.REPO_LOWER }}:latest
-            \${{ secrets.ACR_LOGIN_SERVER }}/\${{ env.REPO_LOWER }}:\${{ github.sha }}
- 
-  # -------------------------------------------------
-  # JOB 4: DEPLOY (Publish Profile, Image-based)
-  # -------------------------------------------------
-  deploy:
-    runs-on: ubuntu-latest
-    needs: docker-build
-    environment: 'Production'
- 
-    steps:
-      - name: Deploy to Azure Web App
-        uses: azure/webapps-deploy@v2
-        with:
-          app-name: \${{ secrets.AZURE_WEBAPP_APP_NAME }}
-          publish-profile: \${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
-          images: \${{ secrets.ACR_LOGIN_SERVER }}/\${{ env.REPO_LOWER }}:\${{ github.sha }}
-\`\`\`
+## 🤖 AI Analysis
+${fixStrategy || 'Analyze the repository and implement the requirements above.'}
 
-    Additional Guidance for Static Website (HTML/CSS/JS):
+---
 
-    1. Only deploy necessary files: index.html, *.html, *.css, *.js, and asset folders (assets/, static/, images/, fonts/).
-    2. Prefer deploying the public/ folder if present; otherwise create a deploy/ folder with only static site files.
-    3. Validate that \${{ env.PACKAGE_DIR }}/index.html exists before deploy; fail fast if missing.
-    4. Use package: \${{ env.PACKAGE_DIR }} in the deploy step to avoid uploading .github/, node_modules/, etc.
-    5. Optionally add .zipignore to exclude non-site content if packaging repository root (not recommended here).
+## Repository Context
+| Property | Value |
+|----------|-------|
+| **Repo** | ${repoName} |
+| **Language** | ${language} |
+| **Default Branch** | ${defaultBranch} |
+| **Build Command** | \`${buildCommand}\` |
+| **Test Command** | \`${testCommand}\` |
+| **Available Secrets** | ${secretPlaceholders} |
 
-    This ensures Azure Web App Zip Deploy receives a minimal, correct package for static sites and reduces deployment failures.
+${workflowGuidance}
+
+## Guidelines
+1. **Read the entire repository first** before making changes
+2. **Use secret placeholders** like \`\${{ secrets.SECRET_NAME }}\` - never hardcode values
+3. **Only create/modify workflows if needed** for this specific task
+4. **Follow ${language} best practices** for code quality
 `;
 }
 
 /**
  * Orchestrates the PR Workflow.
  */
-async function createPullRequestForWorkflow({ repoName, filePath, content, language, issueKey, deployTarget, defaultBranch, repoConfig, ticketData }) {
+async function createPullRequestForWorkflow({ repoName, filePath, content, language, issueKey, deployTarget, defaultBranch, repoConfig, ticketData, aiAnalysis }) {
     try {
         const [owner, repo] = repoName.split('/');
 
@@ -618,13 +515,17 @@ async function createPullRequestForWorkflow({ repoName, filePath, content, langu
 
 
         // 6. Create PR
+        const aiSection = aiAnalysis?.fixStrategy
+            ? `\n\n## 🤖 AI Analysis\n\n**Jira Ticket:** ${issueKey}\n\n**Fix Strategy:**\n${aiAnalysis.fixStrategy}\n\n**Repository Context:**\n${aiAnalysis.repoSummary || 'N/A'}\n\n**Secrets Available:** ${aiAnalysis.availableSecrets?.length ? aiAnalysis.availableSecrets.join(', ') : 'None detected'}`
+            : '';
+
         const { pr, isNew } = await createWorkflowPR({
             owner,
             repo,
             featureBranch,
             defaultBranch,
             title: `${issueKey}: Enable CI/CD for ${language}`,
-            body: `This PR was automatically generated by the DevOps Automation Service for Jira Ticket ${issueKey}.\n\n✅ **Analysis Complete**: Detailed Requirements posted below for Copilot.\n\nAdding ${language} workflow.${deployTarget === 'docker' ? '\n\nAlso added Dockerfile for containerization.' : ''}`
+            body: `This PR was automatically generated by Sentinel for Jira Ticket **${issueKey}**.${aiSection}\n\n✅ **Analysis Complete**: Detailed requirements posted below for @copilot.${deployTarget === 'docker' ? '\n\n📦 Also added Dockerfile for containerization.' : ''}`
         });
 
         // 6a. If we skipped adding a new workflow, attempt to trigger existing workflow on feature branch
@@ -647,7 +548,10 @@ async function createPullRequestForWorkflow({ repoName, filePath, content, langu
                 repoConfig,
                 repoName,
                 defaultBranch,
-                language
+                language,
+                fixStrategy: aiAnalysis?.fixStrategy,
+                hasExistingWorkflow: skipWorkflowUpsert,  // From line 481
+                availableSecrets: aiAnalysis?.availableSecrets  // Secret names as placeholders
             });
 
             await octokit.issues.createComment({
@@ -1100,7 +1004,8 @@ async function getPullRequestDetails({ repoName, pull_number }) {
 }
 
 /**
- * Mark a draft Pull Request as Ready for Review using GitHub GraphQL API.
+ * Approves a sub-PR (e.g., Copilot-generated PR) that targets the main PR's feature branch.
+ * This auto-approves the sub-PR so it can be merged into the feature branch.
  */
 async function approvePullRequest({ repoName, pullNumber }) {
     const [owner, repo] = repoName.split('/');
@@ -1313,40 +1218,7 @@ async function getReleases(repoName) {
     }
 }
 
-module.exports = {
-    generateWorkflowFile,
-    createPullRequestForWorkflow,
-    getPullRequestChecks,
-    detectRepoLanguage,
-    generateDockerfile,
-    analyzeRepoStructure,
-    getRepoInstructions,
-    getDefaultBranch,
-    hasExistingWorkflow,
-    triggerExistingWorkflow,
-    findCopilotSubPR,
-    mergeSubPRIntoBranch,
-    getPullRequestDetails,
-    deleteBranch,
-    markPullRequestReadyForReview,
-    mergePullRequest,
-    enablePullRequestAutoMerge,
-    isPullRequestMerged,
-    approvePullRequest,
-    getLatestWorkflowRunForRef,
-    getJobsForRun,
-    summarizeFailureFromRun,
-    getLatestDeploymentUrl,
-    checkRepoAccess,
-    getRepoRootFiles,
-    getRepoDirectoryFiles,
-    getRepoFileContent,
-    listAccessibleRepos,
-    listRepoWorkflows,
-    getActiveOrgPRsWithJiraKeys,
-    getBranchProtection,
-    getReleases
-};
+// NOTE: module.exports is defined at the end of the file
 
 /**
  * Lists accessible repositories. 
@@ -1520,6 +1392,7 @@ module.exports = {
     createPullRequestForWorkflow,
     getPullRequestChecks,
     detectRepoLanguage,
+    generateDockerfile,
     getRepoInstructions,
     analyzeRepoStructure,
     getDefaultBranch,
@@ -1534,15 +1407,19 @@ module.exports = {
     enablePullRequestAutoMerge,
     isPullRequestMerged,
     approvePullRequest,
+    getLatestWorkflowRunForRef,
+    getJobsForRun,
+    summarizeFailureFromRun,
+    getLatestDeploymentUrl,
     getActiveOrgPRsWithJiraKeys,
     getRepoRootFiles,
     getRepoFileContent,
+    getRepoDirectoryFiles,
     listRepoSecrets,
     listAccessibleRepos,
     checkRepoAccess,
-    getRepoDirectoryFiles,
     listRepoWorkflows,
-    getReleases,          // [NEW]
-    getBranchProtection,   // [NEW] - Also likely needed by devopsChecks
-    listBranches          // [NEW]
+    getReleases,
+    getBranchProtection,
+    listBranches
 };

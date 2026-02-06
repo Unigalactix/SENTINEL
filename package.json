@@ -7,6 +7,9 @@
     "start": "node server.js",
     "start:mcp": "node mcpServer.js",
     "test": "jest",
+    "test:exports": "jest __tests__/exports.test.js",
+    "lint": "eslint src/ scripts/ server.js mcpServer.js",
+    "verify": "npm run lint && npm run test:exports",
     "copilot:suggest": "gh copilot suggest",
     "copilot:fix": "gh copilot suggest --commit"
   },
