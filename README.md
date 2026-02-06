@@ -1,251 +1,271 @@
 # Sentinel 🛡️
-> *Autonomous DevOps Agent & Orchestrator for Jira and GitHub*
 
-Sentinel is a comprehensive automation service that acts as an autonomous agent. It proactively polls Jira for tickets, intelligently detects project requirements, and orchestrates remote CI/CD workflows via GitHub Pull Requests.
+> **Autonomous DevOps Orchestrator for Jira ↔ GitHub**
 
-## Features ✨
+Sentinel continuously monitors Jira boards, automatically creates GitHub PRs with CI/CD workflows, and uses AI to implement ticket requirements—closing the loop from "To Do" to "Done" with minimal human intervention.
 
--   **Sentinel Polling**: Automatically polls Jira every 30 seconds for new tickets.
--   **Dynamic Project Discovery**: Automatically detects all available Jira projects (no need to hardcode keys).
--   **Agentic AI (Azure OpenAI)**: The system now possesses cognitive capabilities:
-    -   **Secret Discovery**: Automatically detects available GitHub Secrets (`AZURE_CREDENTIALS`, etc.).
-    -   **Repo Summarization**: Reads and understands your codebase structure and README.
-    -   **Fix Planning**: Analyzes Jira tickets against repo context to devise a specific "Fix Strategy".
-    -   **Custom Workflows**: Generates tailored GitHub Actions workflows based on the strategy and available secrets.
--   **AI-Powered agent (Optional)**: Enable `USE_GH_COPILOT=true` to unlock:
-    -   **AI Code Fixes**: Automatically applies code fixes tailored to Jira requirements before PR.
-    -   **Sub-PR Management**: Detects, un-drafts, and auto-merges Pull Requests created by `@copilot`.
--   **Smart Language Detection**: Automatically parsing repository files to detect the tech stack:
-    -   `package.json` → **Node.js**
-    -   `*.csproj` / `*.sln` → **.NET**
-    -   `requirements.txt` → **Python**
-    -   `pom.xml` / `build.gradle` → **Java**
--   **Priority Queue**: Processes tickets based on Priority (Highest -> Lowest).
--   **Stable PR Workflow**: Creates specific feature branches (`chore/{key}-workflow-setup`) and opens Pull Requests.
--   **Persistent Logging**: Server activity is logged to `logs/server.log`.
--   **Live Dashboard**: Real-time UI at `http://localhost:3000` showing:
-    -   Active Queue & History
-    -   **Live CI/CD Checks**: See the status of checks (e.g., "Build", "Tests") on the cards directly.
-    -   Quick Links to Jira Tickets and GitHub PRs.
--   **mcp-server**: Built-in Model Context Protocol server for AI Agents (Claude Desktop, etc.).
--   **Security**: Integrated CodeQL scans.
--   **Dynamic Branching**: Automatically detects standard branches (`main`, `master`, `dev`).
--   **Container Ready**: Generates `Dockerfile` for all Azure Web App deployments.
+---
 
-## CLI Paths
+## How It Works
 
--   **GitHub CLI (gh)**: `C:\Program Files\GitHub CLI\gh.exe`
--   **Git (git)**: `C:\Program Files\Git\cmd\git.exe`
+```mermaid
+flowchart LR
+    subgraph JIRA["🟦 Jira"]
+        T1[📋 Ticket Created]
+        T2[✅ Done]
+    end
 
-## Container Registry (ACR Only)
+    subgraph SENTINEL["🤖 Sentinel"]
+        S1[Poll every 30s]
+        S2[Analyze Repo]
+        S3[Generate @copilot Prompt]
+    end
 
--   **Registry**: `mvacrdemo.azurecr.io`
--   **GitHub Secrets required**:
-    -   `ACR_LOGIN_SERVER` = `mvacrdemo.azurecr.io`
-    -   `ACR_USERNAME` = ACR admin or service principal appId
-    -   `ACR_PASSWORD` = ACR password or service principal secret
--   **Tag format**: `${{ secrets.ACR_LOGIN_SERVER }}/${{ env.REPO_LOWER }}:latest` and `:${{ github.sha }}`
--   The workflow computes `REPO_LOWER` from `${{ github.repository }}` to ensure lowercase tags.
+    subgraph GITHUB["🐙 GitHub"]
+        G1[Create PR]
+        G2["@copilot Implements"]
+        G3[CI/CD Runs]
+        G4[Auto-Merge]
+    end
 
-## Azure Web App Deploy Secrets
-
-For publish-profile zip deploy to Azure Web Apps, ensure the target repository has these GitHub Actions secrets configured:
-
-- `AZURE_WEBAPP_APP_NAME`: The Web App name (e.g., `myapp-web`)
-- `AZURE_WEBAPP_SLOT_NAME`: The deployment slot (e.g., `production`)
-- `AZURE_WEBAPP_PUBLISH_PROFILE`: The full publish profile XML content
-
-These are referenced by the generated workflow in the `deploy` job using `azure/webapps-deploy@v2`.
-
-## Prerequisites
-
--   **Node.js** (v18 or higher)
--   **Jira Account** (Cloud) with an API Token.
--   **GitHub Account** with a Personal Access Token (Classic) having `repo`, `workflow`, and `read:user` scopes.
-
-## Setup & Installation
-
-1.  **Clone the repository**:
-    ```bash
-    git clone <your-repo-url>
-    cd AUTOMATION
-    ```
-
-2.  **Install dependencies**:
-    ```bash
-    npm install
-    ```
-
-3.  **Configure Environment**:
-    Create a `.env` file in the root directory:
-    ```env
-    GHUB_TOKEN=ghp_your_github_token_here
-    JIRA_BASE_URL=https://your-domain.atlassian.net
-    JIRA_USER_EMAIL=your-email@example.com
-    JIRA_API_TOKEN=your_jira_api_token
-    JIRA_PROJECT_KEY=PROJ,ECT
-    PORT=3000
-    ```
-
-## Usage
-
-### Run Locally
-```bash
-npm start
-```
--   **Dashboard**: `http://localhost:3000`
--   **MCP Server** (Manual): `npm run start:mcp` (Usually run by AI Client)
-
-### Run with Docker 🐳
-Build and run the containerized application:
-```bash
-docker build -t jira-automation .
-docker run -p 3000:3000 --env-file .env jira-automation
+    T1 -->|"New ticket"| S1
+    S1 --> S2 --> S3 --> G1
+    G1 --> G2 --> G3 --> G4
+    G4 -->|"Webhook"| T2
 ```
 
-### Running Tests
-Execute the Jest unit tests:
-```bash
-npm test
-```
+---
 
-## Security Scans 🔒
+## Key Features
 
-The generated pipelines include built-in security checks. Here is where to find the results:
+| Feature | Description |
+|---------|-------------|
+| **Auto-Polling** | Scans Jira every 30s for new "To Do" tickets |
+| **AI Analysis** | Uses Azure OpenAI to analyze repos and plan fixes |
+| **Smart Detection** | Auto-detects Node/Python/.NET/Java from repo files |
+| **@copilot Integration** | Posts context-aware prompts to trigger GitHub Copilot |
+| **Secret Placeholders** | Uses `${{ secrets.X }}` in workflows—never exposes values |
+| **Sub-PR Management** | Detects, approves, and merges Copilot-generated PRs |
+| **Live Dashboard** | Real-time UI at `http://localhost:3000` |
+| **MCP Server** | Exposes tools for AI agents (Claude, etc.) |
 
-1.  **CodeQL (Source Code)**:
-    *   **In PR**: Look for "Code scanning results" checks at the bottom of the Pull Request.
-    *   **Dashboard**: Go to your Repo > **Security** tab > **Code scanning**.
-
-2.  **Container Scanning**:
-    *   Trivy has been removed per current policy; can be re-enabled later.
-
-## AI Integration (MCP) 🤖
-This project includes an **MCP Server** (`mcpServer.js`).
-Add this to your Claude Desktop config to give your AI access to the agent's tools:
-```json
-"mcpServers": {
-  "sentinel": {
-    "command": "node",
-    "args": ["/absolute/path/to/SENTINEL/mcpServer.js"]
-  }
-}
-```
-**Capabilities:**
--   `sentinel://status`: Read live system status.
--   `generate_workflow_yaml`: Ask AI to draft a CI file using the service's logic.
--   `check_pr_status`: Ask AI to check if a specific PR is passing.
+---
 
 ## Architecture
 
-See [agents.md](./agents.md) for detailed agent specifications.
+```mermaid
+flowchart TB
+    subgraph Client["👤 User"]
+        JIRA_UI[Jira Board]
+        DASHBOARD[Sentinel Dashboard]
+    end
 
-### Workflow Diagram
+    subgraph Sentinel["🤖 Sentinel Server"]
+        SERVER[server.js<br/>Port 3000]
+        MCP[mcpServer.js<br/>MCP Protocol]
+        
+        subgraph Services["Services Layer"]
+            GH[githubService.js<br/>34 functions]
+            JIRA_SVC[jiraService.js<br/>8 functions]
+            LLM[llmService.js<br/>Azure OpenAI]
+            DEVOPS[devopsChecks.js<br/>Repo scanning]
+        end
+    end
+
+    subgraph External["☁️ External APIs"]
+        JIRA_API[Jira REST API]
+        GH_API[GitHub REST API]
+        AZURE[Azure OpenAI]
+    end
+
+    JIRA_UI --> JIRA_API
+    DASHBOARD --> SERVER
+    SERVER --> Services
+    GH --> GH_API
+    JIRA_SVC --> JIRA_API
+    LLM --> AZURE
+    MCP --> Services
+```
+
+---
+
+## Quick Start
+
+### 1. Install
+```bash
+git clone https://github.com/Unigalactix/SENTINEL.git
+cd SENTINEL
+npm install
+```
+
+### 2. Configure `.env`
+```env
+# GitHub
+GHUB_TOKEN=ghp_xxxxxxxxxxxx
+GH_ORG_NAME=YourOrg
+
+# Jira
+JIRA_BASE_URL=https://your-domain.atlassian.net
+JIRA_USER_EMAIL=you@example.com
+JIRA_API_TOKEN=your_jira_token
+
+# AI (Optional)
+AZURE_OPENAI_API_KEY=your_key
+AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com
+AZURE_OPENAI_DEPLOYMENT=gpt-4o
+USE_GH_COPILOT=true
+```
+
+### 3. Run
+```bash
+npm start          # Start server at http://localhost:3000
+npm run start:mcp  # Start MCP server for AI agents
+```
+
+---
+
+## Project Structure
+
+```
+SENTINEL/
+├── server.js              # Main orchestrator (polling, API)
+├── mcpServer.js           # MCP server for AI agents
+├── public/
+│   └── index.html         # Live dashboard UI
+├── src/
+│   ├── services/
+│   │   ├── githubService.js   # 34 GitHub API functions
+│   │   ├── jiraService.js     # Jira API (tickets, transitions)
+│   │   ├── llmService.js      # Azure OpenAI integration
+│   │   └── devopsChecks.js    # Repo scanning
+│   └── tools/
+│       └── definitions.js     # MCP tool definitions
+├── scripts/
+│   └── inspect_repo.js    # Standalone repo inspector
+├── __tests__/
+│   └── exports.test.js    # Export verification (51 tests)
+├── config/
+│   └── board_post_pr_status.json
+└── logs/
+    └── server.log
+```
+
+---
+
+## Workflow Lifecycle
 
 ```mermaid
-graph TD
-    %% Define Styles
-    classDef jira fill:#2684FF,stroke:#0052CC,stroke-width:2px,color:#fff;
-    classDef auto fill:#FFD700,stroke:#B8860B,stroke-width:2px,color:#000;
-    classDef gh fill:#24292e,stroke:#000,stroke-width:2px,color:#fff;
-    classDef fail fill:#FF5630,stroke:#BF2600,stroke-width:2px,color:#fff;
-    classDef success fill:#36B37E,stroke:#006644,stroke-width:2px,color:#fff;
+sequenceDiagram
+    participant User
+    participant Jira
+    participant Sentinel
+    participant GitHub
+    participant Copilot
 
-    %% User Start
-    Start(["👤 User Creates Ticket"])
-    style Start fill:#fff,stroke:#333,stroke-width:2px
-
-    %% Subgraph: Jira
-    subgraph JIRA ["🟦 JIRA (Project Management)"]
-        direction TB
-        TicketState["📋 Ticket: To Do"]
-        Comment["💬 Comment: 'Finished!'"]
-        MoveDone(["✅ Move to Done"])
-        HumanAlert["⚠️ Alert Human"]
+    User->>Jira: Create ticket (To Do)
+    loop Every 30s
+        Sentinel->>Jira: Poll for new tickets
     end
-    class TicketState,Comment,MoveDone jira
-    class HumanAlert fail
-
-    %% Subgraph: Sentinel
-    subgraph BOT ["🤖 Sentinel (Orchestrator)"]
-        direction TB
-        Scan["👀 Scan & Detect"]
-        Analyze["🧠 Analyze & Prompt"]
+    Jira-->>Sentinel: New ticket found
+    
+    Sentinel->>GitHub: Analyze repo structure
+    Sentinel->>Sentinel: Generate AI fix strategy
+    Sentinel->>GitHub: Create feature branch
+    Sentinel->>GitHub: Create PR with @copilot prompt
+    
+    Copilot->>GitHub: Implement changes (sub-PR)
+    Sentinel->>GitHub: Detect & approve sub-PR
+    Sentinel->>GitHub: Merge sub-PR into feature branch
+    
+    GitHub->>GitHub: CI/CD runs
+    alt Tests Pass
+        Sentinel->>GitHub: Auto-merge to main
+        Sentinel->>Jira: Transition to Done
+    else Tests Fail
+        Sentinel->>Jira: Add failure comment
     end
-    class Scan,Analyze auto
-
-    %% Subgraph: GitHub
-    subgraph GITHUB ["🐙 GitHub (Code Repository)"]
-        direction TB
-        Copilot["✨ Copilot: Write Code"]
-        CreatePR["📝 Create PR (Draft)"]
-        TestRun{"🧪 Run Logic"}
-        Decision{"❓ Logic Check"}
-        
-        %% Actions
-        ActionUndraft["🔓 Action: Undraft"]
-        ActionApprove["👍 Action: Approve"]
-        MergePR["🔀 Merge PR"]
-    end
-    class Copilot,CreatePR,MergePR,ActionUndraft,ActionApprove gh
-    class TestRun,Decision gh
-
-    %% Flow Connections
-    Start --> TicketState
-    TicketState -->|"Polling"| Scan
-    Scan -->|"New Item Found"| Analyze
-    
-    %% New Decision Logic
-    Analyze --> CheckExist{Workflow Exists?}
-    CheckExist -->|No| Copilot
-    CheckExist -->|Yes| CheckIntact{Is Intact?}
-    
-    CheckIntact -->|No / Needs Fix| Copilot
-    CheckIntact -->|Yes / Verified| VerifySkip["✅ Verify & Skip"]
-    
-    VerifySkip -.-> MoveDone
-    
-    Copilot -->|"Commit & Push"| CreatePR
-    CreatePR --> TestRun
-    
-    %% Logic Paths
-    TestRun -->|"❌ Tests Failed"| HumanAlert
-    TestRun -->|"✅ Tests Passed"| Decision
-    
-    Decision -->|"Is Draft?"| ActionUndraft
-    Decision -->|"Is Ready?"| ActionApprove
-    
-    ActionUndraft --> MergePR
-    ActionApprove --> MergePR
-    
-    MergePR -->|"Webhook"| Comment
-    Comment --> MoveDone
 ```
 
+---
 
-## Configuration: Per-board Post-PR Status
+## @copilot Prompt Format
 
-You can configure a per-board (project) status that the service will transition Jira tickets to after a PR is created or verified. The precedence is:
+Sentinel generates **context-aware prompts** (not hardcoded YAML):
 
-- `config/board_post_pr_status.json` mapping (project key or project name)
-- `POST_PR_STATUS` environment variable
-- default: `In Progress`
+```markdown
+@copilot /fix **PROJ-123: Add user authentication**
 
-Create `config/board_post_pr_status.json` with a JSON object mapping project keys (e.g. `NDE`) or project names to the desired status. Example:
+[Description from Jira ticket]
 
+---
+## 🤖 AI Analysis
+[AI-generated fix strategy based on repo analysis]
+
+---
+## Repository Context
+| Property | Value |
+|----------|-------|
+| **Repo** | Org/RepoName |
+| **Language** | node |
+| **Available Secrets** | ${{ secrets.ACR_LOGIN_SERVER }}, ... |
+
+> **Note:** This repository already has a CI/CD workflow.
+
+## Guidelines
+1. Read the entire repository first
+2. Use secret placeholders—never hardcode values
+3. Only create workflows if needed
 ```
+
+---
+
+## NPM Scripts
+
+| Command | Description |
+|---------|-------------|
+| `npm start` | Run the server |
+| `npm run start:mcp` | Run MCP server for AI agents |
+| `npm test` | Run all Jest tests |
+| `npm run test:exports` | Verify all function exports |
+| `npm run lint` | Run ESLint |
+| `npm run verify` | Lint + export tests |
+
+---
+
+## MCP Integration
+
+Add to Claude Desktop's `config.json`:
+
+```json
 {
-    "NDE": "In Review",
-    "MKT": "In Development",
-    "OPS": "In Progress"
+  "mcpServers": {
+    "sentinel": {
+      "command": "node",
+      "args": ["C:/path/to/SENTINEL/mcpServer.js"]
+    }
+  }
 }
 ```
 
-Notes:
-- The service will only transition a ticket to `Done` when deployment is detected by the CI checks.
-- If no mapping is found for a project, the `POST_PR_STATUS` env var will be used; otherwise `In Progress` is used.
+**Available Tools:**
+- `sentinel://status` — Live system status
+- `generate_workflow_yaml` — Generate CI/CD workflow
+- `check_pr_status` — Check PR status
+
+---
+
+## GitHub Secrets for Workflows
+
+| Secret | Purpose |
+|--------|---------|
+| `ACR_LOGIN_SERVER` | Azure Container Registry URL |
+| `ACR_USERNAME` | ACR username |
+| `ACR_PASSWORD` | ACR password |
+| `AZURE_WEBAPP_APP_NAME` | Web App name |
+| `AZURE_WEBAPP_PUBLISH_PROFILE` | Publish profile XML |
+
+---
 
 ## License
 
 MIT
-
