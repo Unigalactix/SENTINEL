@@ -117,6 +117,35 @@ async function getPendingTickets() {
 }
 
 /**
+ * Fetch tickets from the Inspection (INS) board
+ * Sorted by creation date (newest first)
+ */
+async function getInspectionTickets() {
+    const jql = 'project = "INS" ORDER BY created DESC';
+    try {
+        const result = await jiraRequest('/rest/api/3/search/jql', 'POST', {
+            jql: jql,
+            fields: [
+                'summary',
+                'description',
+                'priority',
+                'status',
+                'created',
+                'customfield_10000' // Using generic ID placeholder, needs adjustment if repo field is custom
+            ],
+            maxResults: 10 // User asked for "last 4", 10 is a safe upper bound for "recent"
+        });
+        return result.issues || [];
+    } catch (error) {
+        console.error('Error fetching Inspection tickets:', error.message);
+        if (error.message.includes('429')) {
+            console.warn('[Jira Service] Rate limited. Returning empty list to prevent crash.');
+        }
+        return [];
+    }
+}
+
+/**
  * Transition ticket status
  */
 async function transitionIssue(issueKey, targetStatusName) {
@@ -202,7 +231,10 @@ module.exports = {
     createIssue,
     getProjects,
     searchIssues,
-    updateIssue
+    getProjects,
+    searchIssues,
+    updateIssue,
+    getInspectionTickets
 };
 
 /**

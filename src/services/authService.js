@@ -8,6 +8,8 @@ const OAUTH_CLIENT_ID = process.env.OAUTH_CLIENT_ID;
 const OAUTH_CLIENT_SECRET = process.env.OAUTH_CLIENT_SECRET;
 const GITHUB_APP_ID = process.env.GITHUB_APP_ID;
 
+const GITHUB_APP_NAME = 'sentinel-dev-agent'; // Replace with your actual GitHub App name (slug)
+
 /**
  * Generates the GitHub OAuth authorization URL
  */
@@ -22,11 +24,15 @@ function getAuthorizationUrl(redirectUri) {
 }
 
 /**
- * Generates the GitHub App installation URL
+ * Returns the GitHub App Installation URL
  */
 function getInstallationUrl() {
-    return `https://github.com/apps/sentinel-devops/installations/new`;
+    // If we have the App ID/Slug, we can direct users to install it.
+    // For a public app: https://github.com/apps/<app-slug>/installations/new
+    const appSlug = process.env.GITHUB_APP_SLUG || 'sentinel-dev-agent';
+    return `https://github.com/apps/${appSlug}/installations/new`;
 }
+
 
 /**
  * Generates a random state for CSRF protection
