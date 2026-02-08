@@ -26,7 +26,8 @@ const {
     getOctokit,
     setUserToken,
     getUserToken,
-    clearUserToken
+    clearUserToken,
+    setActiveToken
 } = require('./src/services/githubService');
 const { getPendingTickets, transitionIssue, addComment, getIssueDetails } = require('./src/services/jiraService');
 const llmService = require('./src/services/llmService'); // [NEW]
@@ -76,7 +77,10 @@ let systemStatus = {
     currentPrUrl: null,        // New: URL to created PR
     currentPayload: null,      // New: Generated YAML content
     nextScanTime: Date.now() + 1000,
-    paused: false              // New: Pause state
+    paused: false,             // Pause state
+    // Per-user auth state
+    activeUserToken: null,     // OAuth token from logged-in user
+    activeUser: null           // User info from logged-in user
 };
 
 const repoLanguageCache = new Map();
@@ -173,7 +177,19 @@ app.get('/api/auth/callback', async (req, res) => {
         req.session.accessToken = tokenData.accessToken;
         req.session.authMethod = 'oauth';
 
-        console.log(`[Auth] User ${user.login} logged in via OAuth`);
+        // Store active user token for background processing (ticket processing, PR creation)
+        systemStatus.activeUserToken = tokenData.accessToken;
+        systemStatus.activeUser = {
+            id: user.id,
+            login: user.login,
+            name: user.name,
+            avatar_url: user.avatar_url
+        };
+
+        // Set active token in githubService for all API calls
+        setActiveToken(tokenData.accessToken);
+
+        console.log(`[Auth] User ${user.login} logged in via OAuth - token stored for background processing`);
         res.redirect('/');
     } catch (err) {
         console.error('[Auth] OAuth callback error:', err.message);
@@ -188,7 +204,14 @@ app.post('/api/auth/logout', (req, res) => {
             if (err) {
                 return res.status(500).json({ error: 'Failed to logout' });
             }
-            console.log(`[Auth] User ${user} logged out`);
+            // Clear active user token for background processing
+            systemStatus.activeUserToken = null;
+            systemStatus.activeUser = null;
+
+            // Clear active token in githubService
+            setActiveToken(null);
+
+            console.log(`[Auth] User ${user} logged out - active token cleared`);
             res.json({ message: 'Logged out successfully' });
         });
     } else {
@@ -974,6 +997,16 @@ async function startPolling() {
 
                 systemStatus.currentPhase = 'Paused';
                 systemStatus.currentTicketKey = 'PAUSED';
+                systemStatus.nextScanTime = Date.now() + POLL_INTERVAL_MS;
+                setTimeout(poll, POLL_INTERVAL_MS);
+                return;
+            }
+
+            // Check if user is logged in - require OAuth for all GitHub operations
+            if (!systemStatus.activeUserToken) {
+                systemStatus.currentPhase = 'Waiting for Login';
+                systemStatus.currentTicketKey = 'LOGIN_REQUIRED';
+                systemStatus.currentTicketLogs = ['⚠️ Please login with GitHub to start processing tickets'];
                 systemStatus.nextScanTime = Date.now() + POLL_INTERVAL_MS;
                 setTimeout(poll, POLL_INTERVAL_MS);
                 return;

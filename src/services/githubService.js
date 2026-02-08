@@ -97,9 +97,43 @@ if (hasOAuth) {
     console.log('[GitHub] Per-user OAuth authentication enabled');
 }
 
-// Backward compatibility: create module-level octokit for existing functions
-// New per-user functions should use getOctokit(userToken) directly
-const octokit = getDefaultOctokit();
+// Module-level active token - set by server when user logs in
+let activeToken = null;
+
+/**
+ * Set the active OAuth token for all GitHub operations.
+ * Called by server.js when user logs in.
+ */
+function setActiveToken(token) {
+    activeToken = token;
+    if (token) {
+        console.log('[GitHub] Active user token set - all operations will use OAuth');
+    } else {
+        console.log('[GitHub] Active user token cleared');
+    }
+}
+
+/**
+ * Get the current active token (for inspection/debugging)
+ */
+function getActiveToken() {
+    return activeToken;
+}
+
+// Dynamic getter for octokit that uses active token
+// This allows all existing functions to automatically use the logged-in user's token
+function getClient() {
+    return getOctokit(activeToken);
+}
+
+// For functions that use the module-level octokit directly,
+// we create a proxy that always uses the current active token
+const octokit = new Proxy({}, {
+    get(target, prop) {
+        const client = getClient();
+        return client[prop];
+    }
+});
 
 /**
  * Generates a default Dockerfile content based on language.
@@ -355,11 +389,12 @@ ${deployJob}
 /**
  * Ensures a feature branch exists, based on the default branch.
  */
-async function ensureFeatureBranch({ owner, repo, defaultBranch, featureBranch }) {
+async function ensureFeatureBranch({ owner, repo, defaultBranch, featureBranch, userToken }) {
+    const client = getOctokit(userToken);
     console.log(`Ensuring branch ${featureBranch} exists...`);
 
     // 1. Get default branch ref
-    const { data: baseRef } = await octokit.git.getRef({
+    const { data: baseRef } = await client.git.getRef({
         owner,
         repo,
         ref: `heads/${defaultBranch}`,
@@ -367,7 +402,7 @@ async function ensureFeatureBranch({ owner, repo, defaultBranch, featureBranch }
 
     // 2. Try to get feature branch
     try {
-        await octokit.git.getRef({
+        await client.git.getRef({
             owner,
             repo,
             ref: `heads/${featureBranch}`,
@@ -379,7 +414,7 @@ async function ensureFeatureBranch({ owner, repo, defaultBranch, featureBranch }
     }
 
     // 3. Create feature branch from default branch tip
-    await octokit.git.createRef({
+    await client.git.createRef({
         owner,
         repo,
         ref: `refs/heads/${featureBranch}`,
@@ -392,13 +427,14 @@ async function ensureFeatureBranch({ owner, repo, defaultBranch, featureBranch }
  * Creates or Updates a file on a specific branch.
  * safe for re-runs.
  */
-async function upsertWorkflowFileOnBranch({ owner, repo, branch, message, contentBase64, filePath }) {
+async function upsertWorkflowFileOnBranch({ owner, repo, branch, message, contentBase64, filePath, userToken }) {
+    const client = getOctokit(userToken);
     console.log(`Upserting file ${filePath} on branch ${branch}...`);
     let sha;
 
     // 1. Check if file exists to get SHA (for update)
     try {
-        const { data } = await octokit.repos.getContent({
+        const { data } = await client.repos.getContent({
             owner,
             repo,
             path: filePath,
@@ -426,7 +462,7 @@ async function upsertWorkflowFileOnBranch({ owner, repo, branch, message, conten
         body.sha = sha;
     }
 
-    await octokit.repos.createOrUpdateFileContents(body);
+    await client.repos.createOrUpdateFileContents(body);
     console.log(`File upserted successfully.`);
 }
 
@@ -434,11 +470,12 @@ async function upsertWorkflowFileOnBranch({ owner, repo, branch, message, conten
  * Opens a Pull Request from feature -> default.
  * SAFELY checks if it exists first.
  */
-async function createWorkflowPR({ owner, repo, featureBranch, defaultBranch, title, body }) {
+async function createWorkflowPR({ owner, repo, featureBranch, defaultBranch, title, body, userToken }) {
+    const client = getOctokit(userToken);
     console.log(`Checking for existing Pull Request...`);
 
     // 1. Check if PR already exists
-    const { data: openPRs } = await octokit.pulls.list({
+    const { data: openPRs } = await client.pulls.list({
         owner,
         repo,
         state: 'open',
@@ -453,7 +490,7 @@ async function createWorkflowPR({ owner, repo, featureBranch, defaultBranch, tit
 
     // 2. Create new PR
     console.log(`Creating new Pull Request...`);
-    const { data: pr } = await octokit.pulls.create({
+    const { data: pr } = await client.pulls.create({
         owner,
         repo,
         head: featureBranch,
@@ -1488,6 +1525,8 @@ module.exports = {
     setUserToken,
     getUserToken,
     clearUserToken,
+    setActiveToken,
+    getActiveToken,
 
     // Workflow generation
     generateWorkflowFile,

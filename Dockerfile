@@ -1,17 +1,22 @@
+# Sentinel - Node.js Alpine Docker Image
 FROM node:20-alpine
 
 # Set working directory
 WORKDIR /app
 
-# Install dependencies first (for caching)
+# Install dependencies first (better caching)
 COPY package*.json ./
-RUN npm ci --only=production
+RUN npm ci --omit=dev
 
-# Copy source
+# Copy application files
 COPY . .
 
-# Expose port (3000)
+# Expose port
 EXPOSE 3000
 
-# Start command
-CMD ["npm", "start"]
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+  CMD wget --no-verbose --tries=1 --spider http://localhost:3000/api/auth/status || exit 1
+
+# Start application
+CMD ["node", "server.js"]
