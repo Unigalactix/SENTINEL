@@ -6,55 +6,100 @@ let createAppAuth = null;
 try {
     createAppAuth = require('@octokit/auth-app').createAppAuth;
 } catch (e) {
-    console.log('[GitHub] @octokit/auth-app not installed. Using PAT authentication only.');
+    // GitHub App auth not available
 }
 
 /**
- * Initialize Octokit with GitHub App authentication (preferred) or PAT fallback.
- * GitHub App provides:
- * - Short-lived tokens (1 hour) vs long-lived PAT
- * - Bot identity ("Sentinel [bot]") instead of personal account
- * - Fine-grained permissions per repository
- * - Multi-tenant support (each user installs the app)
+ * Per-user token store (maps session ID to access token)
+ * In production, use Redis or database
  */
-function createOctokitClient() {
+const userTokenStore = new Map();
+
+/**
+ * Store a user's access token
+ */
+function setUserToken(sessionId, accessToken) {
+    userTokenStore.set(sessionId, accessToken);
+}
+
+/**
+ * Get a user's access token
+ */
+function getUserToken(sessionId) {
+    return userTokenStore.get(sessionId);
+}
+
+/**
+ * Clear a user's token on logout
+ */
+function clearUserToken(sessionId) {
+    userTokenStore.delete(sessionId);
+}
+
+/**
+ * Creates an Octokit instance for the given authentication context.
+ * Priority:
+ * 1. User's OAuth token (per-user auth)
+ * 2. GitHub App credentials (fallback for server-side operations)
+ * 3. Personal Access Token (legacy fallback)
+ * 
+ * @param {string} [userToken] - OAuth access token from user session
+ * @returns {Octokit} Configured Octokit instance
+ */
+function getOctokit(userToken) {
+    // Priority 1: Use user's OAuth token if provided
+    if (userToken) {
+        return new Octokit({ auth: userToken });
+    }
+
+    // Priority 2: Use GitHub App if configured
     const appId = process.env.GITHUB_APP_ID;
     const privateKey = process.env.GITHUB_PRIVATE_KEY;
     let installationId = process.env.GITHUB_INSTALLATION_ID;
 
-    // Extract numeric ID if URL was provided
     if (installationId && installationId.includes('/')) {
         const match = installationId.match(/\/(\d+)$/);
         if (match) installationId = match[1];
     }
 
-    // Use GitHub App if all credentials are provided
-    if (appId && privateKey && installationId) {
-        console.log('[GitHub] Using GitHub App authentication (App ID: ' + appId + ')');
+    if (appId && privateKey && installationId && createAppAuth) {
         return new Octokit({
             authStrategy: createAppAuth,
-            auth: {
-                appId: appId,
-                privateKey: privateKey,
-                installationId: installationId,
-            },
+            auth: { appId, privateKey, installationId }
         });
     }
 
-    // Fallback to Personal Access Token
+    // Priority 3: Use PAT if configured
     if (process.env.GHUB_TOKEN) {
-        console.log('[GitHub] Using Personal Access Token (PAT) authentication');
-        return new Octokit({
-            auth: process.env.GHUB_TOKEN
-        });
+        return new Octokit({ auth: process.env.GHUB_TOKEN });
     }
 
-    // No authentication configured
-    console.warn('[GitHub] WARNING: No authentication configured! Set GITHUB_APP_ID + GITHUB_PRIVATE_KEY + GITHUB_INSTALLATION_ID or GHUB_TOKEN');
+    // No authentication - limited API access
+    console.warn('[GitHub] No authentication configured!');
     return new Octokit();
 }
 
-const octokit = createOctokitClient();
+// For backward compatibility, create a default client for server boot
+// This is only used for initial status checks, not per-user operations
+let defaultOctokit = null;
+function getDefaultOctokit() {
+    if (!defaultOctokit) {
+        defaultOctokit = getOctokit();
+    }
+    return defaultOctokit;
+}
+
+// Log which auth methods are available
+const hasAppAuth = !!(process.env.GITHUB_APP_ID && process.env.GITHUB_PRIVATE_KEY);
+const hasOAuth = !!(process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET);
+console.log(`[GitHub] Auth methods available: OAuth=${hasOAuth}, GitHubApp=${hasAppAuth}`);
+if (hasOAuth) {
+    console.log('[GitHub] Per-user OAuth authentication enabled');
+}
+
+// Backward compatibility: create module-level octokit for existing functions
+// New per-user functions should use getOctokit(userToken) directly
+const octokit = getDefaultOctokit();
 
 /**
  * Generates a default Dockerfile content based on language.
@@ -1438,6 +1483,13 @@ async function listBranches(repoName) {
 }
 
 module.exports = {
+    // Auth functions for per-user tokens
+    getOctokit,
+    setUserToken,
+    getUserToken,
+    clearUserToken,
+
+    // Workflow generation
     generateWorkflowFile,
     createPullRequestForWorkflow,
     getPullRequestChecks,
@@ -1473,3 +1525,4 @@ module.exports = {
     getBranchProtection,
     listBranches
 };
+

@@ -21,7 +21,12 @@ const {
     isPullRequestMerged,
     approvePullRequest,
     getActiveOrgPRsWithJiraKeys,
-    listRepoSecrets // [NEW]
+    listRepoSecrets,
+    // Per-user auth functions
+    getOctokit,
+    setUserToken,
+    getUserToken,
+    clearUserToken
 } = require('./src/services/githubService');
 const { getPendingTickets, transitionIssue, addComment, getIssueDetails } = require('./src/services/jiraService');
 const llmService = require('./src/services/llmService'); // [NEW]
@@ -387,12 +392,59 @@ function logProgress(message) {
     writeLog(message);
 }
 
-// --- API for Repos ---
+// --- API for Repos (Per-User) ---
 app.get('/api/repos', async (req, res) => {
     try {
-        const { listAccessibleRepos } = require('./src/services/githubService');
-        const repos = await listAccessibleRepos();
-        res.json(repos);
+        // Use user's OAuth token if logged in, otherwise fallback to app auth
+        const userToken = req.session?.accessToken;
+        const octokit = getOctokit(userToken);
+
+        // Fetch repos accessible to the authenticated user
+        const repos = [];
+        try {
+            const { data } = await octokit.repos.listForAuthenticatedUser({
+                per_page: 100,
+                sort: 'updated'
+            });
+            repos.push(...data.map(r => ({
+                full_name: r.full_name,
+                name: r.name,
+                owner: r.owner.login,
+                private: r.private,
+                description: r.description,
+                language: r.language,
+                updated_at: r.updated_at
+            })));
+        } catch (e) {
+            console.log('[API] Failed to list user repos:', e.message);
+        }
+
+        // Also try org repos if ALLOWED_ORGS is set
+        const allowedOrgs = (process.env.ALLOWED_ORGS || '').split(',').map(o => o.trim()).filter(Boolean);
+        for (const org of allowedOrgs) {
+            try {
+                const { data } = await octokit.repos.listForOrg({
+                    org,
+                    per_page: 100,
+                    sort: 'updated'
+                });
+                repos.push(...data.map(r => ({
+                    full_name: r.full_name,
+                    name: r.name,
+                    owner: r.owner.login,
+                    private: r.private,
+                    description: r.description,
+                    language: r.language,
+                    updated_at: r.updated_at
+                })));
+            } catch (e) {
+                console.log(`[API] Failed to list org ${org} repos:`, e.message);
+            }
+        }
+
+        // Deduplicate by full_name
+        const uniqueRepos = [...new Map(repos.map(r => [r.full_name, r])).values()];
+        res.json(uniqueRepos);
     } catch (e) {
         res.status(500).json({ error: e.message });
     }
