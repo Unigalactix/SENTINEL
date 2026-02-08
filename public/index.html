@@ -110,6 +110,13 @@
             flex: 1;
         }
 
+        /* Copilot Warning Banner Structure */
+        #copilotWarning {
+            display: none;
+            /* Controlled by JS */
+        }
+
+
         /* Glass Utility Class */
         .glass-panel {
             background: var(--glass-surface);
@@ -138,6 +145,21 @@
             align-items: center;
             gap: 16px;
             text-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
+        }
+
+        /* Copilot Warning Banner */
+        #copilotWarning {
+            display: none;
+            background: rgba(220, 38, 38, 0.2);
+            border: 1px solid rgba(220, 38, 38, 0.4);
+            color: #fca5a5;
+            padding: 12px 24px;
+            border-radius: 12px;
+            margin-bottom: 20px;
+            align-items: center;
+            justify-content: space-between;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 4px 20px rgba(220, 38, 38, 0.1);
         }
 
         .board-title svg {
@@ -1123,6 +1145,22 @@
             </div>
         </div>
 
+        <!-- Recent Inspections (Full Width) -->
+        <div class="glass-panel" style="padding:1.5rem;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
+                <h3 style="margin:0; font-size:1.1rem; color:var(--text-main);">Recent Inspections (INS Board)</h3>
+                <span style="font-size:0.8rem; color:var(--text-dim);">Visible to all users</span>
+            </div>
+            <div id="inspectionsList" style="display:flex; flex-direction:column; max-height:200px; overflow-y:auto;">
+                <div class="empty-state">Loading...</div>
+            </div>
+            <style>
+                .ins-item:hover {
+                    background: rgba(255, 255, 255, 0.05);
+                }
+            </style>
+        </div>
+
         <!-- Kanban Board -->
         <div class="kanban-board">
             <!-- TO DO -->
@@ -1647,6 +1685,14 @@
                 const res = await fetch('/api/status');
                 const data = await res.json();
 
+                // Check Copilot Status
+                const copilotBanner = document.getElementById('copilotWarning');
+                if (data.activeUser && data.activeUser.copilot_enabled === false) {
+                    copilotBanner.style.display = 'flex';
+                } else {
+                    copilotBanner.style.display = 'none';
+                }
+
                 // Sync Pause State
                 if (data.paused !== undefined && data.paused !== isSystemPaused) {
                     isSystemPaused = data.paused;
@@ -1671,6 +1717,37 @@
                 const btnJira = document.getElementById('btnJira');
                 const btnGithub = document.getElementById('btnGithub');
                 const btnPayload = document.getElementById('btnPayload');
+
+                // 2.1 Fetch and Update Recent Inspections (Move outside main poll loop for independent refreshing or keep here but handle errors gracefully)
+                // We'll keep it here but add a check to not clear the list if fetch fails/rates limits
+                try {
+                    // Only fetch every 10th poll (approx 5 mins) or if list is empty, to avoid 429s
+                    if (!window.lastInsFetch || (Date.now() - window.lastInsFetch > 300000) || document.getElementById('inspectionsList').innerHTML.includes('Loading')) {
+                        console.log('Fetching inspections...');
+                        const inspectRes = await fetch('/api/inspections');
+                        if (inspectRes.ok) {
+                            const inspectData = await inspectRes.json();
+                            const insList = document.getElementById('inspectionsList');
+                            if (inspectData.tickets && inspectData.tickets.length > 0) {
+                                // Default Jira URL fallback
+                                const baseUrl = data.currentJiraUrl ? new URL(data.currentJiraUrl).origin : 'https://unigalactix.atlassian.net';
+
+                                insList.innerHTML = inspectData.tickets.map(t => `
+                                    <a href="${baseUrl}/browse/${t.key}" target="_blank" class="ins-item" style="text-decoration:none; display:flex; gap:10px; padding:8px; border-bottom:1px solid rgba(255,255,255,0.05); align-items:center; transition:background 0.2s;">
+                                        <span style="font-family:'JetBrains Mono'; font-size:0.8rem; color:var(--primary);">${t.key}</span>
+                                        <span style="font-size:0.85rem; color:var(--text-main); flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${t.fields.summary}</span>
+                                        <span style="font-size:0.7rem; color:var(--text-dim);">${new Date(t.fields.created).toLocaleDateString()}</span>
+                                    </a>
+                                `).join('');
+                                window.lastInsFetch = Date.now();
+                            } else {
+                                insList.innerHTML = '<div class="empty-state" style="padding:1rem;">No recent inspections found</div>';
+                            }
+                        }
+                    }
+                } catch (e) {
+                    console.error("Failed to load inspections", e);
+                }
 
                 if (data.currentTicketKey) {
                     hero.classList.remove('idle');

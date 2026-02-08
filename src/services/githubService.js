@@ -1512,12 +1512,13 @@ async function listBranches(repoName) {
 }
 
 /**
- * Check if the current user has push access to the repository
+ * Check if the current user has access to the repository
  * @param {string} repoName - The repository name (owner/repo)
  * @param {string} [token] - Optional token override
- * @returns {Promise<boolean>} - True if user has push access
+ * @param {boolean} [requirePush] - If true, checks for push permissions (default: true)
+ * @returns {Promise<boolean>} - True if access conditions are met
  */
-async function checkRepoAccess(repoName, token = null) {
+async function checkRepoAccess(repoName, token = null, requirePush = true) {
     try {
         const client = token ? getOctokit(token) : getOctokit();
         const [owner, repo] = repoName.split('/');
@@ -1527,10 +1528,70 @@ async function checkRepoAccess(repoName, token = null) {
             repo
         });
 
-        // Check for push permission (collaborator or owner)
-        return data.permissions && data.permissions.push === true;
+        if (requirePush) {
+            // Check for push permission (collaborator or owner)
+            // Note: Public repos accessed without token lack 'permissions' field
+            return data.permissions && data.permissions.push === true;
+        }
+
+        // If we get here, repo exists and is readable
+        return true;
     } catch (error) {
         console.warn(`[GitHub] Access check failed for ${repoName}: ${error.message}`);
+        return false;
+    }
+}
+
+/**
+ * Check if the authenticated user has installed the GitHub App
+ * @param {string} token - The user's access token
+ * @returns {Promise<boolean>} - True if the app is installed
+ */
+async function checkAppInstallation(token) {
+    if (!token) return false;
+    try {
+        const client = getOctokit(token);
+        // List installations accessible to the user
+        // This endpoint requires user-to-server token
+        const { data } = await client.apps.listInstallationsForAuthenticatedUser();
+
+        const appSlug = process.env.GITHUB_APP_SLUG || 'sentinel-dev-agent';
+        // data.installations is expected to be an array
+        const installations = data.installations || [];
+        return installations.some(inst => inst.app_slug === appSlug || inst.account?.login === appSlug);
+    } catch (error) {
+        console.warn(`[GitHub] Failed to check app installation: ${error.message}`);
+        return false;
+    }
+}
+
+
+/**
+ * Check if the user has an active GitHub Copilot subscription.
+ * Uses the internal Copilot endpoint as a proxy check.
+ * @param {string} token 
+ * @returns {Promise<boolean>}
+ */
+async function checkCopilotStatus(token) {
+    if (!token) return false;
+    try {
+        // Try to access the Copilot Internal Token endpoint.
+        // This is what the VS Code extension uses.
+        // If successful (200), the user likely has access.
+        const response = await fetch('https://api.github.com/copilot_internal/v2/token', {
+            headers: {
+                'Authorization': `token ${token}`,
+                'Accept': 'application/json'
+            }
+        });
+
+        if (response.status === 200) {
+            return true;
+        }
+        console.warn(`[GitHub] Copilot check failed: ${response.status} ${response.statusText}`);
+        return false;
+    } catch (error) {
+        console.warn(`[GitHub] Failed to check Copilot status: ${error.message}`);
         return false;
     }
 }
@@ -1539,6 +1600,8 @@ module.exports = {
     // Auth functions for per-user tokens
     getOctokit,
     checkRepoAccess, // [NEW]
+    checkAppInstallation, // [NEW]
+    checkCopilotStatus, // [NEW]
     setUserToken,
     getUserToken,
     clearUserToken,

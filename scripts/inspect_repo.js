@@ -83,7 +83,8 @@ async function processRepo(repoName, autoFix = false, logger = console.log) {
     }
 
     log(`\n🔍 Verifying access to ${repoName}...`);
-    const isAccessible = await checkRepoAccess(repoName);
+    // Allow read-only access for inspection (requirePush = false)
+    const isAccessible = await checkRepoAccess(repoName, null, false);
 
     if (!isAccessible) {
         error(`\n❌ Error: Repository ${repoName} not found or PAT does not have access.`);

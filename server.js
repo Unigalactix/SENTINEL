@@ -27,9 +27,11 @@ const {
     setUserToken,
     getUserToken,
     clearUserToken,
-    setActiveToken
+    setActiveToken,
+    checkAppInstallation, // [NEW]
+    checkCopilotStatus    // [NEW]
 } = require('./src/services/githubService');
-const { getPendingTickets, transitionIssue, addComment, getIssueDetails } = require('./src/services/jiraService');
+const { getPendingTickets, transitionIssue, addComment, getIssueDetails, getInspectionTickets } = require('./src/services/jiraService');
 const llmService = require('./src/services/llmService'); // [NEW]
 require('dotenv').config();
 
@@ -189,7 +191,31 @@ app.get('/api/auth/callback', async (req, res) => {
         // Set active token in githubService for all API calls
         setActiveToken(tokenData.accessToken);
 
-        console.log(`[Auth] User ${user.login} logged in via OAuth - token stored for background processing`);
+        // [NEW] Check if the user has installed the GitHub App
+        const isInstalled = await checkAppInstallation(tokenData.accessToken);
+
+        // [NEW] Check for Copilot Plan
+        const hasCopilot = await checkCopilotStatus(tokenData.accessToken);
+
+        console.log(`[Auth] User ${user.login} logged in via OAuth (App Installed: ${isInstalled}, Copilot: ${hasCopilot})`);
+
+        // Store Copilot status in session
+        req.session.user.copilot_enabled = hasCopilot;
+
+        // Update system status
+        systemStatus.activeUser.copilot_enabled = hasCopilot;
+
+        console.log(`[DEBUG] isInstalled type: ${typeof isInstalled}, value: ${isInstalled}`);
+
+        if (isInstalled === false) {
+            console.log('[DEBUG] User has NOT installed the app. Redirecting to installation...');
+            // Redirect to App Installation page
+            const installUrl = authService.getInstallationUrl();
+            console.log(`[DEBUG] Install URL: ${installUrl}`);
+            return res.redirect(installUrl);
+        }
+
+        console.log('[DEBUG] App is installed (or check passed). Redirecting to Dashboard.');
         res.redirect('/');
     } catch (err) {
         console.error('[Auth] OAuth callback error:', err.message);
@@ -233,7 +259,14 @@ app.post('/api/copilot/suggest', async (req, res) => {
     // gh copilot suggest does not support --message/--filename; call plain suggest
     const args = ['copilot', 'suggest'];
 
-    execFile('gh', args, { cwd: process.cwd() }, (error, stdout, stderr) => {
+    // [NEW] Use user's token for Copilot access
+    const userToken = req.session?.accessToken || systemStatus.activeUserToken;
+    const env = { ...process.env };
+    if (userToken) {
+        env.GITHUB_TOKEN = userToken;
+    }
+
+    execFile('gh', args, { cwd: process.cwd(), env }, (error, stdout, stderr) => {
         if (error) {
             return res.status(500).json({ error: error.message, stderr });
         }
@@ -474,6 +507,16 @@ app.get('/api/repos', async (req, res) => {
 });
 
 // --- API for Inspection ---
+app.get('/api/inspections', async (req, res) => {
+    try {
+        const tickets = await getInspectionTickets();
+        res.json({ tickets });
+    } catch (e) {
+        console.error('[API] Failed to fetch inspections:', e.message);
+        res.status(500).json({ error: e.message });
+    }
+});
+
 app.post('/api/inspect', async (req, res) => {
     const { repoName } = req.body;
     if (!repoName) return res.status(400).json({ error: 'repoName is required' });
@@ -772,8 +815,15 @@ async function processTicketData(issue) {
 
             // Call plain suggest without unsupported flags
             const args = ['copilot', 'suggest'];
+
+            // [NEW] Use active user's token for Copilot access
+            const env = { ...process.env };
+            if (activeToken) {
+                env.GITHUB_TOKEN = activeToken;
+            }
+
             const ghOutput = await new Promise((resolve) => {
-                execFile('gh', args, { cwd: process.cwd() }, (error, stdout, stderr) => {
+                execFile('gh', args, { cwd: process.cwd(), env }, (error, stdout, stderr) => {
                     if (error) {
                         logProgress(`Copilot CLI failed: ${error.message}. Falling back.`);
                         resolve(null);
