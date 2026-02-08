@@ -49,6 +49,7 @@ The agent determines how to build/test a project using this strict precedence or
 -   **Secrets Management**:
     -   `ACR_LOGIN_SERVER`, `ACR_USERNAME`, `ACR_PASSWORD` (For Docker builds).
     -   `AZURE_WEBAPP_PUBLISH_PROFILE` (For Web App deployment).
+    -   `OAUTH_CLIENT_ID`, `OAUTH_CLIENT_SECRET` (For GitHub OAuth).
 
 ---
 
