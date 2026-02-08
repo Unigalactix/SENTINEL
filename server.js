@@ -26,7 +26,8 @@ const {
     getOctokit,
     setUserToken,
     getUserToken,
-    clearUserToken
+    clearUserToken,
+    setActiveToken
 } = require('./src/services/githubService');
 const { getPendingTickets, transitionIssue, addComment, getIssueDetails } = require('./src/services/jiraService');
 const llmService = require('./src/services/llmService'); // [NEW]
@@ -185,6 +186,9 @@ app.get('/api/auth/callback', async (req, res) => {
             avatar_url: user.avatar_url
         };
 
+        // Set active token in githubService for all API calls
+        setActiveToken(tokenData.accessToken);
+
         console.log(`[Auth] User ${user.login} logged in via OAuth - token stored for background processing`);
         res.redirect('/');
     } catch (err) {
@@ -203,6 +207,10 @@ app.post('/api/auth/logout', (req, res) => {
             // Clear active user token for background processing
             systemStatus.activeUserToken = null;
             systemStatus.activeUser = null;
+
+            // Clear active token in githubService
+            setActiveToken(null);
+
             console.log(`[Auth] User ${user} logged out - active token cleared`);
             res.json({ message: 'Logged out successfully' });
         });
