@@ -1,0 +1,122 @@
+/**
+ * Authentication Service for GitHub App OAuth
+ * Handles OAuth flow, token exchange, and session management
+ */
+require('dotenv').config();
+
+const GITHUB_CLIENT_ID = process.env.GITHUB_CLIENT_ID || process.env.GITHUB_APP_CLIENT_ID;
+const GITHUB_CLIENT_SECRET = process.env.GITHUB_CLIENT_SECRET;
+const GITHUB_APP_ID = process.env.GITHUB_APP_ID;
+
+/**
+ * Generates the GitHub OAuth authorization URL
+ */
+function getAuthorizationUrl(redirectUri) {
+    const params = new URLSearchParams({
+        client_id: GITHUB_CLIENT_ID,
+        redirect_uri: redirectUri,
+        scope: 'repo read:org read:user',
+        state: generateState()
+    });
+    return `https://github.com/login/oauth/authorize?${params.toString()}`;
+}
+
+/**
+ * Generates the GitHub App installation URL
+ */
+function getInstallationUrl() {
+    return `https://github.com/apps/sentinel-devops/installations/new`;
+}
+
+/**
+ * Generates a random state for CSRF protection
+ */
+function generateState() {
+    return Math.random().toString(36).substring(2, 15);
+}
+
+/**
+ * Exchanges the OAuth code for an access token
+ */
+async function exchangeCodeForToken(code, redirectUri) {
+    const response = await fetch('https://github.com/login/oauth/access_token', {
+        method: 'POST',
+        headers: {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            client_id: GITHUB_CLIENT_ID,
+            client_secret: GITHUB_CLIENT_SECRET,
+            code: code,
+            redirect_uri: redirectUri
+        })
+    });
+
+    const data = await response.json();
+
+    if (data.error) {
+        throw new Error(`OAuth error: ${data.error_description || data.error}`);
+    }
+
+    return {
+        accessToken: data.access_token,
+        tokenType: data.token_type,
+        scope: data.scope
+    };
+}
+
+/**
+ * Fetches the authenticated user's GitHub profile
+ */
+async function getGitHubUser(accessToken) {
+    const response = await fetch('https://api.github.com/user', {
+        headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Accept': 'application/vnd.github+json',
+            'X-GitHub-Api-Version': '2022-11-28'
+        }
+    });
+
+    if (!response.ok) {
+        throw new Error('Failed to fetch GitHub user');
+    }
+
+    return await response.json();
+}
+
+/**
+ * Check if we have valid GitHub App credentials configured
+ */
+function hasGitHubAppCredentials() {
+    return !!(GITHUB_APP_ID && process.env.GITHUB_PRIVATE_KEY && process.env.GITHUB_INSTALLATION_ID);
+}
+
+/**
+ * Check if we have OAuth credentials configured
+ */
+function hasOAuthCredentials() {
+    return !!(GITHUB_CLIENT_ID && GITHUB_CLIENT_SECRET);
+}
+
+/**
+ * Get authentication status and available methods
+ */
+function getAuthConfig() {
+    return {
+        hasGitHubApp: hasGitHubAppCredentials(),
+        hasOAuth: hasOAuthCredentials(),
+        clientId: GITHUB_CLIENT_ID,
+        appId: GITHUB_APP_ID
+    };
+}
+
+module.exports = {
+    getAuthorizationUrl,
+    getInstallationUrl,
+    exchangeCodeForToken,
+    getGitHubUser,
+    hasGitHubAppCredentials,
+    hasOAuthCredentials,
+    getAuthConfig
+};
