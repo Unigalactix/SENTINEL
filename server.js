@@ -91,8 +91,109 @@ function writeLog(message) {
     });
 }
 
+const session = require('express-session');
+const authService = require('./src/services/authService');
+
 app.use(express.json());
+app.use(session({
+    secret: process.env.SESSION_SECRET || 'sentinel-dev-secret-change-in-prod',
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+        secure: false, // Set to true in production with HTTPS
+        httpOnly: true,
+        maxAge: 24 * 60 * 60 * 1000 // 24 hours
+    }
+}));
 app.use(express.static('public')); // Serve UI
+
+// --- Authentication Endpoints ---
+app.get('/api/auth/status', (req, res) => {
+    const config = authService.getAuthConfig();
+    if (req.session && req.session.user) {
+        return res.json({
+            authenticated: true,
+            user: req.session.user,
+            authMethod: req.session.authMethod || 'oauth'
+        });
+    }
+    // Check if GitHub App is configured (no login needed)
+    if (config.hasGitHubApp) {
+        return res.json({
+            authenticated: true,
+            authMethod: 'github-app',
+            user: { login: 'Sentinel [bot]', type: 'Bot' }
+        });
+    }
+    return res.json({
+        authenticated: false,
+        hasOAuth: config.hasOAuth,
+        hasGitHubApp: config.hasGitHubApp
+    });
+});
+
+app.get('/api/auth/login', (req, res) => {
+    const config = authService.getAuthConfig();
+    if (!config.hasOAuth) {
+        return res.status(400).json({ error: 'OAuth not configured. Set GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET.' });
+    }
+    const redirectUri = `${req.protocol}://${req.get('host')}/api/auth/callback`;
+    const authUrl = authService.getAuthorizationUrl(redirectUri);
+    res.redirect(authUrl);
+});
+
+app.get('/api/auth/callback', async (req, res) => {
+    const { code, error } = req.query;
+
+    if (error) {
+        return res.redirect('/?error=' + encodeURIComponent(error));
+    }
+
+    if (!code) {
+        return res.redirect('/?error=missing_code');
+    }
+
+    try {
+        const redirectUri = `${req.protocol}://${req.get('host')}/api/auth/callback`;
+        const tokenData = await authService.exchangeCodeForToken(code, redirectUri);
+        const user = await authService.getGitHubUser(tokenData.accessToken);
+
+        // Store in session
+        req.session.user = {
+            id: user.id,
+            login: user.login,
+            name: user.name,
+            avatar_url: user.avatar_url
+        };
+        req.session.accessToken = tokenData.accessToken;
+        req.session.authMethod = 'oauth';
+
+        console.log(`[Auth] User ${user.login} logged in via OAuth`);
+        res.redirect('/');
+    } catch (err) {
+        console.error('[Auth] OAuth callback error:', err.message);
+        res.redirect('/?error=' + encodeURIComponent(err.message));
+    }
+});
+
+app.post('/api/auth/logout', (req, res) => {
+    if (req.session) {
+        const user = req.session.user?.login || 'Unknown';
+        req.session.destroy((err) => {
+            if (err) {
+                return res.status(500).json({ error: 'Failed to logout' });
+            }
+            console.log(`[Auth] User ${user} logged out`);
+            res.json({ message: 'Logged out successfully' });
+        });
+    } else {
+        res.json({ message: 'No session to destroy' });
+    }
+});
+
+app.get('/api/auth/install', (req, res) => {
+    res.redirect(authService.getInstallationUrl());
+});
 
 // --- Optional: GH Copilot Suggest Integration ---
 app.post('/api/copilot/suggest', async (req, res) => {
