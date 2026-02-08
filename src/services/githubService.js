@@ -91,7 +91,7 @@ function getDefaultOctokit() {
 
 // Log which auth methods are available
 const hasAppAuth = !!(process.env.GITHUB_APP_ID && process.env.GITHUB_PRIVATE_KEY);
-const hasOAuth = !!(process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET);
+const hasOAuth = !!(process.env.OAUTH_CLIENT_ID && process.env.OAUTH_CLIENT_SECRET);
 console.log(`[GitHub] Auth methods available: OAuth=${hasOAuth}, GitHubApp=${hasAppAuth}`);
 if (hasOAuth) {
     console.log('[GitHub] Per-user OAuth authentication enabled');

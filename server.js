@@ -144,7 +144,7 @@ app.get('/api/auth/status', (req, res) => {
 app.get('/api/auth/login', (req, res) => {
     const config = authService.getAuthConfig();
     if (!config.hasOAuth) {
-        return res.status(400).json({ error: 'OAuth not configured. Set GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET.' });
+        return res.status(400).json({ error: 'OAuth not configured. Set OAUTH_CLIENT_ID and OAUTH_CLIENT_SECRET.' });
     }
     const redirectUri = `${req.protocol}://${req.get('host')}/api/auth/callback`;
     const authUrl = authService.getAuthorizationUrl(redirectUri);

@@ -4,8 +4,8 @@
  */
 require('dotenv').config();
 
-const GITHUB_CLIENT_ID = process.env.GITHUB_CLIENT_ID || process.env.GITHUB_APP_CLIENT_ID;
-const GITHUB_CLIENT_SECRET = process.env.GITHUB_CLIENT_SECRET;
+const OAUTH_CLIENT_ID = process.env.OAUTH_CLIENT_ID;
+const OAUTH_CLIENT_SECRET = process.env.OAUTH_CLIENT_SECRET;
 const GITHUB_APP_ID = process.env.GITHUB_APP_ID;
 
 /**
@@ -13,7 +13,7 @@ const GITHUB_APP_ID = process.env.GITHUB_APP_ID;
  */
 function getAuthorizationUrl(redirectUri) {
     const params = new URLSearchParams({
-        client_id: GITHUB_CLIENT_ID,
+        client_id: OAUTH_CLIENT_ID,
         redirect_uri: redirectUri,
         scope: 'repo read:org read:user',
         state: generateState()
@@ -46,8 +46,8 @@ async function exchangeCodeForToken(code, redirectUri) {
             'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-            client_id: GITHUB_CLIENT_ID,
-            client_secret: GITHUB_CLIENT_SECRET,
+            client_id: OAUTH_CLIENT_ID,
+            client_secret: OAUTH_CLIENT_SECRET,
             code: code,
             redirect_uri: redirectUri
         })
@@ -96,7 +96,7 @@ function hasGitHubAppCredentials() {
  * Check if we have OAuth credentials configured
  */
 function hasOAuthCredentials() {
-    return !!(GITHUB_CLIENT_ID && GITHUB_CLIENT_SECRET);
+    return !!(OAUTH_CLIENT_ID && OAUTH_CLIENT_SECRET);
 }
 
 /**
@@ -106,7 +106,7 @@ function getAuthConfig() {
     return {
         hasGitHubApp: hasGitHubAppCredentials(),
         hasOAuth: hasOAuthCredentials(),
-        clientId: GITHUB_CLIENT_ID,
+        clientId: OAUTH_CLIENT_ID,
         appId: GITHUB_APP_ID
     };
 }
