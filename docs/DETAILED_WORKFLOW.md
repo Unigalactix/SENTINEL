@@ -186,6 +186,7 @@ graph TD
 
 ### Phase 1: Ingestion & Analysis
 1.  **Polling**: The system wakes up every 30 seconds and queries the Jira API for tickets in the "To Do" column.
+    *   **Authentication**: Uses the per-user OAuth token (if available) or service account for API access.
 2.  **Analysis**:
     *   **Project Detection**: Reads the detected repository to identify the tech stack (e.g., `package.json` for Node, `pom.xml` for Java).
     *   **Requirement Parsing**: Extracts key requirements from the Jira ticket description.

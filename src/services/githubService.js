@@ -1411,15 +1411,7 @@ async function listAccessibleRepos() {
 /**
  * Verifies if the PAT can access the repo.
  */
-async function checkRepoAccess(repoName) {
-    const [owner, repo] = repoName.split('/');
-    try {
-        await octokit.repos.get({ owner, repo });
-        return { accessible: true };
-    } catch (error) {
-        return { accessible: false, error: error.message };
-    }
-}
+
 
 /**
  * Lists files in the root directory of the repo.
@@ -1519,9 +1511,34 @@ async function listBranches(repoName) {
     }
 }
 
+/**
+ * Check if the current user has push access to the repository
+ * @param {string} repoName - The repository name (owner/repo)
+ * @param {string} [token] - Optional token override
+ * @returns {Promise<boolean>} - True if user has push access
+ */
+async function checkRepoAccess(repoName, token = null) {
+    try {
+        const client = token ? getOctokit(token) : getOctokit();
+        const [owner, repo] = repoName.split('/');
+
+        const { data } = await client.repos.get({
+            owner,
+            repo
+        });
+
+        // Check for push permission (collaborator or owner)
+        return data.permissions && data.permissions.push === true;
+    } catch (error) {
+        console.warn(`[GitHub] Access check failed for ${repoName}: ${error.message}`);
+        return false;
+    }
+}
+
 module.exports = {
     // Auth functions for per-user tokens
     getOctokit,
+    checkRepoAccess, // [NEW]
     setUserToken,
     getUserToken,
     clearUserToken,
@@ -1558,7 +1575,7 @@ module.exports = {
     getRepoDirectoryFiles,
     listRepoSecrets,
     listAccessibleRepos,
-    checkRepoAccess,
+    // checkRepoAccess, // Removed duplicate
     listRepoWorkflows,
     getReleases,
     getBranchProtection,

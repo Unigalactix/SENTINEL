@@ -590,22 +590,22 @@ async function processTicketData(issue) {
     let resolvedDefaultBranch = null;
 
     // Enforce allowed orgs scope
-    const defaultOwner = (projectDefaultRepo || process.env.DEFAULT_REPO || 'Unigalactix/sample-node-project').split('/')[0];
-    const allowedOrgs = (process.env.ALLOWED_ORGS ? process.env.ALLOWED_ORGS.split(',') : [defaultOwner])
-        .map(s => s.trim())
-        .filter(Boolean);
-    const targetOwner = (repoName.split('/')[0] || '').trim();
-    if (targetOwner && allowedOrgs.length && !allowedOrgs.includes(targetOwner)) {
-        const msg = `Org out of scope: "${targetOwner}". Allowed orgs: ${allowedOrgs.join(', ')}`;
-        logProgress(msg);
-        if (issueKey) {
-            await addComment(issueKey, `❌ ${msg}`);
-            await transitionIssue(issueKey, 'To Do');
-        }
-        // Stop processing this ticket
+    // [UPDATED] User Permission Filtering
+    // Only process tickets if the logged-in user has push access (owner or collaborator)
+    const activeToken = systemStatus.activeUserToken;
+    if (!activeToken) {
+        logProgress(`Skipping ticket ${issueKey || 'unknown'} - No active user logged in.`);
+        return;
+    }
+
+    const hasAccess = await githubService.checkRepoAccess(repoName, activeToken);
+    if (!hasAccess) {
+        logProgress(`Skipping ticket ${issueKey} - User does not have push access to ${repoName}.`);
+        // Do NOT transition or comment, just ignore.
         systemStatus.activeTickets = systemStatus.activeTickets.filter(t => t.key !== issueKey);
         return;
     }
+    logProgress(`User access verified for ${repoName}`);
 
     // Validate repo existence/access early
     try {

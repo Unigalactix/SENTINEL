@@ -89,6 +89,7 @@ While the logic is simple, the technology is robust.
 *   **Server (`server.js`)**: The "Brain" running in Node.js that coordinates everything.
     *   **Agentic AI**: Uses Azure OpenAI to plan fixes and specific workflows.
     *   **Intelligence**: Can optionally use `gh copilot` CLI to generate code fixes.
+    *   **Authentication**: Uses **GitHub OAuth** to perform actions on behalf of the logged-in user (Per-User Security).
 *   **LLM Service (`llmService.js`)**: The "Cognitive Engine" connecting to Azure OpenAI.
 *   **GitHub Service (`githubService.js`)**: The "Librarian" that knows how to speak to GitHub's complex API.
 *   **Jira Service (`jiraService.js`)**: The "Messenger" that translates code updates into business updates on Jira.
@@ -98,7 +99,8 @@ While the logic is simple, the technology is robust.
 ### Glossary
 *   **Pull Request (PR)**: A request to merge new code changes into the main project.
 *   **Merge**: The act of combining new code into the main codebase.
-*   **Deploy**: Putting the specific code onto a server where users can see it.
+*   **Deploy**: Putting the specific code onto a server (Azure Web App) where users can see it.
+*   **OAuth**: Secure delegation protocol used to authenticate users against GitHub.
 *   **MCP (Model Context Protocol)**: A standard way for AI models to talk to external tools and data.
 
 ### System Architecture & Execution Flow

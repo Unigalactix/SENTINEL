@@ -2,6 +2,10 @@
 
 > **Autonomous DevOps Orchestrator for Jira ↔ GitHub**
 
+[![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FUnigalactix%2FSENTINEL%2Fmain%2Fazuredeploy.json)
+[![Live Demo](https://img.shields.io/badge/Live%20Demo-Azure-0072C6?style=for-the-badge&logo=microsoftazure)](https://sentineldevagent.azurewebsites.net)
+[![Install App](https://img.shields.io/badge/Install%20App-GitHub-181717?style=for-the-badge&logo=github)](https://github.com/apps/sentinel-devops-automation-agent)
+
 Sentinel continuously monitors Jira boards, automatically creates GitHub PRs with CI/CD workflows, and uses AI to implement ticket requirements—closing the loop from "To Do" to "Done" with minimal human intervention.
 
 ---
@@ -41,6 +45,7 @@ flowchart LR
 | Feature | Description |
 |---------|-------------|
 | **Auto-Polling** | Scans Jira every 30s for new "To Do" tickets |
+| **Per-User Auth** | Uses GitHub OAuth to perform actions as the logged-in user |
 | **AI Analysis** | Uses Azure OpenAI to analyze repos and plan fixes |
 | **Smart Detection** | Auto-detects Node/Python/.NET/Java from repo files |
 | **@copilot Integration** | Posts context-aware prompts to trigger GitHub Copilot |
@@ -65,8 +70,8 @@ flowchart TB
         MCP[mcpServer.js<br/>MCP Protocol]
         
         subgraph Services["Services Layer"]
-            GH[githubService.js<br/>34 functions]
-            JIRA_SVC[jiraService.js<br/>8 functions]
+        gh[githubService.js<br/>OAuth & API]
+            JIRA_SVC[jiraService.js<br/>Tickets]
             LLM[llmService.js<br/>Azure OpenAI]
             DEVOPS[devopsChecks.js<br/>Repo scanning]
         end
@@ -81,7 +86,7 @@ flowchart TB
     JIRA_UI --> JIRA_API
     DASHBOARD --> SERVER
     SERVER --> Services
-    GH --> GH_API
+    gh --> GH_API
     JIRA_SVC --> JIRA_API
     LLM --> AZURE
     MCP --> Services
@@ -100,9 +105,9 @@ npm install
 
 ### 2. Configure `.env`
 ```env
-# GitHub
-GHUB_TOKEN=ghp_xxxxxxxxxxxx
-GH_ORG_NAME=YourOrg
+# GitHub OAuth (Required for Per-User Auth)
+OAUTH_CLIENT_ID=your_client_id
+OAUTH_CLIENT_SECRET=your_client_secret
 
 # Jira
 JIRA_BASE_URL=https://your-domain.atlassian.net
@@ -114,6 +119,9 @@ AZURE_OPENAI_API_KEY=your_key
 AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com
 AZURE_OPENAI_DEPLOYMENT=gpt-4o
 USE_GH_COPILOT=true
+
+# Session
+SESSION_SECRET=your_random_secret
 ```
 
 ### 3. Run
@@ -134,7 +142,8 @@ SENTINEL/
 │   └── index.html         # Live dashboard UI
 ├── src/
 │   ├── services/
-│   │   ├── githubService.js   # 34 GitHub API functions
+│   │   ├── githubService.js   # GitHub API functions
+│   │   ├── authService.js     # OAuth handling
 │   │   ├── jiraService.js     # Jira API (tickets, transitions)
 │   │   ├── llmService.js      # Azure OpenAI integration
 │   │   └── devopsChecks.js    # Repo scanning
@@ -146,8 +155,9 @@ SENTINEL/
 │   └── exports.test.js    # Export verification (51 tests)
 ├── config/
 │   └── board_post_pr_status.json
-└── logs/
-    └── server.log
+├── logs/
+│   └── server.log
+└── Dockerfile             # Container definition
 ```
 
 ---
@@ -263,6 +273,10 @@ Add to Claude Desktop's `config.json`:
 | `ACR_PASSWORD` | ACR password |
 | `AZURE_WEBAPP_APP_NAME` | Web App name |
 | `AZURE_WEBAPP_PUBLISH_PROFILE` | Publish profile XML |
+| `OAUTH_CLIENT_ID` | GitHub OAuth App Client ID |
+| `OAUTH_CLIENT_SECRET` | GitHub OAuth App Client Secret |
+| `JIRA_API_TOKEN` | Jira API Token |
+| `SESSION_SECRET` | Session Encryption Key |
 
 ---
 
