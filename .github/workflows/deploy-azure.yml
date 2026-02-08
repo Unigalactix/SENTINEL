@@ -34,11 +34,23 @@ jobs:
     needs: build-and-push
     steps:
       - name: Deploy to Azure Web App
-        uses: azure/webapps-deploy@v2
+        uses: azure/webapps-deploy@v3
         with:
           app-name: sentineldevagent
           publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
           images: ${{ secrets.ACR_LOGIN_SERVER }}/sentinel:${{ github.sha }}
+          app-settings-json: |
+            [
+              {"name": "OAUTH_CLIENT_ID", "value": "${{ secrets.OAUTH_CLIENT_ID }}"},
+              {"name": "OAUTH_CLIENT_SECRET", "value": "${{ secrets.OAUTH_CLIENT_SECRET }}"},
+              {"name": "SESSION_SECRET", "value": "${{ secrets.SESSION_SECRET }}"},
+              {"name": "JIRA_BASE_URL", "value": "${{ secrets.JIRA_BASE_URL }}"},
+              {"name": "JIRA_USER_EMAIL", "value": "${{ secrets.JIRA_USER_EMAIL }}"},
+              {"name": "JIRA_API_TOKEN", "value": "${{ secrets.JIRA_API_TOKEN }}"},
+              {"name": "LLM_API_KEY", "value": "${{ secrets.LLM_API_KEY }}"},
+              {"name": "LLM_ENDPOINT", "value": "${{ secrets.LLM_ENDPOINT }}"},
+              {"name": "WEBSITES_PORT", "value": "3000"}
+            ]
 
       - name: Summary
         run: |
