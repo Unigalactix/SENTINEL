@@ -80,12 +80,94 @@ let systemStatus = {
     currentPayload: null,      // New: Generated YAML content
     nextScanTime: Date.now() + 1000,
     paused: false,             // Pause state
-    // Per-user auth state
+    // Per-user auth state (DEPRECATED - use activeAgents instead)
     activeUserToken: null,     // OAuth token from logged-in user
     activeUser: null           // User info from logged-in user
 };
 
+// --- MULTI-TENANT AGENT SYSTEM ---
+// Map of userId -> agent context
+const activeAgents = new Map();
+
+/**
+ * Register or update an agent for a logged-in user
+ * @param {object} user - User object with id, login, name, avatar_url
+ * @param {string} token - OAuth access token
+ * @param {boolean} hasCopilot - Whether user has Copilot access
+ * @returns {object} The agent object
+ */
+function registerAgent(user, token, hasCopilot = false) {
+    const existing = activeAgents.get(user.id);
+    const agent = {
+        userId: user.id,
+        token: token,
+        user: {
+            id: user.id,
+            login: user.login,
+            name: user.name,
+            avatar_url: user.avatar_url,
+            copilot_enabled: hasCopilot
+        },
+        tickets: existing?.tickets || [],      // Preserve tickets if refreshing
+        logs: existing?.logs || [],           // Preserve logs if refreshing
+        lastActivity: Date.now(),
+        registeredAt: existing?.registeredAt || Date.now()
+    };
+    activeAgents.set(user.id, agent);
+    console.log(`[Agents] Registered agent for ${user.login} (${activeAgents.size} total agents)`);
+    return agent;
+}
+
+/**
+ * Remove an agent when user logs out
+ * @param {string|number} userId 
+ */
+function removeAgent(userId) {
+    const agent = activeAgents.get(userId);
+    if (agent) {
+        console.log(`[Agents] Removed agent for ${agent.user.login}`);
+        activeAgents.delete(userId);
+    }
+}
+
+/**
+ * Get agent for a user ID
+ * @param {string|number} userId 
+ * @returns {object|null}
+ */
+function getAgent(userId) {
+    return activeAgents.get(userId) || null;
+}
+
+/**
+ * Get the first active agent (fallback for single-user mode)
+ * @returns {object|null}
+ */
+function getFirstAgent() {
+    if (activeAgents.size === 0) return null;
+    return activeAgents.values().next().value;
+}
+
+/**
+ * Cleanup stale agents (no activity for 1 hour)
+ */
+function cleanupStaleAgents() {
+    const ONE_HOUR = 60 * 60 * 1000;
+    const now = Date.now();
+    for (const [userId, agent] of activeAgents) {
+        if (now - agent.lastActivity > ONE_HOUR) {
+            console.log(`[Agents] Cleaning up stale agent for ${agent.user.login}`);
+            activeAgents.delete(userId);
+        }
+    }
+}
+
+// Run stale agent cleanup every 15 minutes
+setInterval(cleanupStaleAgents, 15 * 60 * 1000);
+
+// Cache for detected repository languages
 const repoLanguageCache = new Map();
+
 
 // Ensure logs directory exists
 const LOG_DIR = path.join(__dirname, 'logs');
@@ -180,6 +262,7 @@ app.get('/api/auth/callback', async (req, res) => {
         req.session.authMethod = 'oauth';
 
         // Store active user token for background processing (ticket processing, PR creation)
+        // DEPRECATED: These global fields maintained for backward compatibility
         systemStatus.activeUserToken = tokenData.accessToken;
         systemStatus.activeUser = {
             id: user.id,
@@ -202,8 +285,12 @@ app.get('/api/auth/callback', async (req, res) => {
         // Store Copilot status in session
         req.session.user.copilot_enabled = hasCopilot;
 
-        // Update system status
+        // Update system status (DEPRECATED)
         systemStatus.activeUser.copilot_enabled = hasCopilot;
+
+        // [NEW] Register agent in multi-tenant system
+        const agent = registerAgent(user, tokenData.accessToken, hasCopilot);
+        req.session.agentId = agent.userId;
 
         console.log(`[DEBUG] isInstalled type: ${typeof isInstalled}, value: ${isInstalled}`);
 
@@ -225,19 +312,27 @@ app.get('/api/auth/callback', async (req, res) => {
 
 app.post('/api/auth/logout', (req, res) => {
     if (req.session) {
-        const user = req.session.user?.login || 'Unknown';
+        const userId = req.session.user?.id;
+        const userLogin = req.session.user?.login || 'Unknown';
+
+        // [NEW] Remove agent from multi-tenant system
+        if (userId) {
+            removeAgent(userId);
+        }
+
         req.session.destroy((err) => {
             if (err) {
                 return res.status(500).json({ error: 'Failed to logout' });
             }
-            // Clear active user token for background processing
+            // Clear active user token for background processing (DEPRECATED)
             systemStatus.activeUserToken = null;
             systemStatus.activeUser = null;
 
             // Clear active token in githubService
+            clearUserToken();
             setActiveToken(null);
 
-            console.log(`[Auth] User ${user} logged out - active token cleared`);
+            console.log(`[Auth] User ${userLogin} logged out - agent removed`);
             res.json({ message: 'Logged out successfully' });
         });
     } else {
@@ -276,7 +371,48 @@ app.post('/api/copilot/suggest', async (req, res) => {
 
 // --- API for UI ---
 app.get('/api/status', (req, res) => {
-    res.json(systemStatus);
+    // Get the current user's agent if logged in
+    const userId = req.session?.user?.id;
+    const myAgent = userId ? getAgent(userId) : null;
+
+    // Update agent's last activity timestamp
+    if (myAgent) {
+        myAgent.lastActivity = Date.now();
+    }
+
+    // Build list of all active agent identities (sanitized - no tokens)
+    const allAgents = [];
+    for (const [id, agent] of activeAgents) {
+        allAgents.push({
+            userId: agent.userId,
+            login: agent.user.login,
+            name: agent.user.name,
+            avatar_url: agent.user.avatar_url,
+            copilot_enabled: agent.user.copilot_enabled,
+            ticketCount: agent.tickets?.length || 0,
+            lastActivity: agent.lastActivity
+        });
+    }
+
+    res.json({
+        ...systemStatus,
+        // Multi-tenant fields
+        myAgent: myAgent ? {
+            userId: myAgent.userId,
+            user: myAgent.user,
+            tickets: myAgent.tickets,
+            logs: myAgent.logs,
+            lastActivity: myAgent.lastActivity
+        } : null,
+        allAgents: allAgents,
+        activeAgentsCount: activeAgents.size
+    });
+});
+
+// Serve Jira base URL to the frontend for link construction
+app.get('/api/jira-base-url', (req, res) => {
+    const baseUrl = process.env.JIRA_BASE_URL || 'https://unigalactix.atlassian.net';
+    res.json({ baseUrl });
 });
 
 // List monitored Jira projects (keys)

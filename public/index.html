@@ -1346,6 +1346,7 @@
                     <div class="user-info" id="userInfo">
                         ${currentUser.avatar_url ? `<img src="${currentUser.avatar_url}" class="user-avatar" alt="">` : ''}
                         <span class="user-name">${currentUser.login || currentUser.name}</span>
+                        <span id="agentCountBadge" style="display:none; background:var(--primary); color:white; padding:2px 8px; border-radius:99px; font-size:0.75rem; margin-left:4px;" title="Active agents"></span>
                         <button class="btn-logout" onclick="logout()" title="Logout">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
@@ -1356,6 +1357,19 @@
                     </div>
                 `;
                 headerRight.insertAdjacentHTML('beforeend', userHtml);
+            }
+        }
+
+        // Update agent count badge in header
+        function updateAgentBadge(count) {
+            const badge = document.getElementById('agentCountBadge');
+            if (badge) {
+                if (count > 1) {
+                    badge.textContent = count + ' agents';
+                    badge.style.display = 'inline';
+                } else {
+                    badge.style.display = 'none';
+                }
             }
         }
 
@@ -1699,6 +1713,11 @@
                     updatePauseButtonUI();
                 }
 
+                // Update multi-tenant agent badge
+                if (data.activeAgentsCount !== undefined) {
+                    updateAgentBadge(data.activeAgentsCount);
+                }
+
                 // 1. Update Timer
                 document.getElementById('phaselabel').innerText = data.currentPhase.toUpperCase();
                 if (data.nextScanTime && data.currentPhase === 'Waiting') {
@@ -1718,36 +1737,7 @@
                 const btnGithub = document.getElementById('btnGithub');
                 const btnPayload = document.getElementById('btnPayload');
 
-                // 2.1 Fetch and Update Recent Inspections (Move outside main poll loop for independent refreshing or keep here but handle errors gracefully)
-                // We'll keep it here but add a check to not clear the list if fetch fails/rates limits
-                try {
-                    // Only fetch every 10th poll (approx 5 mins) or if list is empty, to avoid 429s
-                    if (!window.lastInsFetch || (Date.now() - window.lastInsFetch > 300000) || document.getElementById('inspectionsList').innerHTML.includes('Loading')) {
-                        console.log('Fetching inspections...');
-                        const inspectRes = await fetch('/api/inspections');
-                        if (inspectRes.ok) {
-                            const inspectData = await inspectRes.json();
-                            const insList = document.getElementById('inspectionsList');
-                            if (inspectData.tickets && inspectData.tickets.length > 0) {
-                                // Default Jira URL fallback
-                                const baseUrl = data.currentJiraUrl ? new URL(data.currentJiraUrl).origin : 'https://unigalactix.atlassian.net';
-
-                                insList.innerHTML = inspectData.tickets.map(t => `
-                                    <a href="${baseUrl}/browse/${t.key}" target="_blank" class="ins-item" style="text-decoration:none; display:flex; gap:10px; padding:8px; border-bottom:1px solid rgba(255,255,255,0.05); align-items:center; transition:background 0.2s;">
-                                        <span style="font-family:'JetBrains Mono'; font-size:0.8rem; color:var(--primary);">${t.key}</span>
-                                        <span style="font-size:0.85rem; color:var(--text-main); flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${t.fields.summary}</span>
-                                        <span style="font-size:0.7rem; color:var(--text-dim);">${new Date(t.fields.created).toLocaleDateString()}</span>
-                                    </a>
-                                `).join('');
-                                window.lastInsFetch = Date.now();
-                            } else {
-                                insList.innerHTML = '<div class="empty-state" style="padding:1rem;">No recent inspections found</div>';
-                            }
-                        }
-                    }
-                } catch (e) {
-                    console.error("Failed to load inspections", e);
-                }
+                // 2.1 Inspections are fetched independently (see fetchInspections() below)
 
                 if (data.currentTicketKey) {
                     hero.classList.remove('idle');
@@ -1838,6 +1828,47 @@
 
         setInterval(fetchStatus, 1000);
         fetchStatus();
+
+        // --- Independent Inspections Fetcher (runs on its own timer, never blocks fetchStatus) ---
+        async function fetchInspections() {
+            try {
+                const inspectRes = await fetch('/api/inspections');
+                if (!inspectRes.ok) return;
+                const inspectData = await inspectRes.json();
+                const insList = document.getElementById('inspectionsList');
+                if (!insList) return;
+
+                if (inspectData.tickets && inspectData.tickets.length > 0) {
+                    // Build Jira base URL safely from env config
+                    let baseUrl = 'https://unigalactix.atlassian.net';
+                    try {
+                        const cfgRes = await fetch('/api/jira-base-url');
+                        if (cfgRes.ok) {
+                            const cfg = await cfgRes.json();
+                            if (cfg.baseUrl) baseUrl = cfg.baseUrl;
+                        }
+                    } catch (e) { /* use fallback */ }
+
+                    insList.innerHTML = inspectData.tickets.map(t => `
+                        <a href="${baseUrl}/browse/${t.key}" target="_blank" class="ins-item" style="text-decoration:none; display:flex; gap:10px; padding:8px 12px; border-bottom:1px solid rgba(255,255,255,0.05); align-items:center; transition:background 0.2s;">
+                            <span style="font-family:'JetBrains Mono'; font-size:0.8rem; color:var(--primary); min-width:60px;">${t.key}</span>
+                            <span style="font-size:0.85rem; color:var(--text-main); flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${t.fields.summary || 'Untitled'}</span>
+                            <span style="font-size:0.7rem; padding:2px 8px; border-radius:4px; background:rgba(255,255,255,0.05); color:var(--text-dim);">${t.fields.status ? t.fields.status.name : ''}</span>
+                            <span style="font-size:0.7rem; color:var(--text-dim);">${t.fields.created ? new Date(t.fields.created).toLocaleDateString() : ''}</span>
+                        </a>
+                    `).join('');
+                } else {
+                    insList.innerHTML = '<div class="empty-state" style="padding:1rem;">No inspection tickets found in INS board</div>';
+                }
+            } catch (e) {
+                console.error('Failed to load inspections:', e);
+                // Don't clear existing content on error
+            }
+        }
+
+        // Fetch inspections immediately and then every 60 seconds
+        fetchInspections();
+        setInterval(fetchInspections, 60000);
 
         // Start MCP Inspector
 
