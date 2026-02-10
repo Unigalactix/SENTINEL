@@ -40,3 +40,7 @@ Thumbs.db
 
 # Testing Artifacts
 test_results.json
+
+# Generated Documentation
+docs/FINAL_REVIEW.md
+docs/suggestions.md

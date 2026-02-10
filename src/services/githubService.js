@@ -46,10 +46,20 @@ function clearUserToken(sessionId) {
  * @param {string} [userToken] - OAuth access token from user session
  * @returns {Octokit} Configured Octokit instance
  */
+function addErrorLogging(client) {
+    client.hook.error('request', async (error, options) => {
+        if (error.status === 401) {
+            console.error(`[GitHub] ❌ Unauthorized (401): Token may be expired or invalid. URI: ${options.method} ${options.url}`);
+        }
+        throw error;
+    });
+    return client;
+}
+
 function getOctokit(userToken) {
     // Priority 1: Use user's OAuth token if provided
     if (userToken) {
-        return new Octokit({ auth: userToken });
+        return addErrorLogging(new Octokit({ auth: userToken }));
     }
 
     // Priority 2: Use GitHub App if configured
@@ -63,20 +73,20 @@ function getOctokit(userToken) {
     }
 
     if (appId && privateKey && installationId && createAppAuth) {
-        return new Octokit({
+        return addErrorLogging(new Octokit({
             authStrategy: createAppAuth,
             auth: { appId, privateKey, installationId }
-        });
+        }));
     }
 
     // Priority 3: Use PAT if configured
     if (process.env.GHUB_TOKEN) {
-        return new Octokit({ auth: process.env.GHUB_TOKEN });
+        return addErrorLogging(new Octokit({ auth: process.env.GHUB_TOKEN }));
     }
 
     // No authentication - limited API access
     console.warn('[GitHub] No authentication configured!');
-    return new Octokit();
+    return addErrorLogging(new Octokit());
 }
 
 // For backward compatibility, create a default client for server boot
