@@ -1,5 +1,5 @@
 // tests/githubService.test.js
-const { generateWorkflowFile, detectRepoLanguage } = require('../githubService');
+const { generateWorkflowFile, detectRepoLanguage } = require('../src/services/githubService');
 
 // Mock @octokit/rest before requiring the service?
 // Since githubService instantiates Octokit immediately on require, we need to mock it carefully.
@@ -42,7 +42,7 @@ describe('githubService', () => {
                 buildCommand: 'npm run build',
                 testCommand: 'npm test'
             });
-            expect(yaml).toContain('Set up Node.js');
+            expect(yaml).toContain('Setup Node.js');
             expect(yaml).toContain('npm run build');
             expect(yaml).toContain('npm test');
             expect(yaml).toContain('Running NPM Audit');
@@ -123,7 +123,7 @@ describe('githubService', () => {
 
     // --- generateDockerfile Tests ---
     describe('generateDockerfile', () => {
-        const { generateDockerfile } = require('../githubService');
+        const { generateDockerfile } = require('../src/services/githubService');
 
         test('should generate Node.js Dockerfile', () => {
             const dockerfile = generateDockerfile('node');
@@ -154,7 +154,8 @@ describe('githubService', () => {
             });
             expect(yaml).toContain('security-scan:');
             expect(yaml).toContain('github/codeql-action/init@v3');
-            expect(yaml).toContain('languages: javascript');
+            expect(yaml).toContain('languages: ${{ env.CODEQL_LANGUAGE }}');
+            expect(yaml).toContain('CODEQL_LANGUAGE: javascript');
         });
 
         test('should include docker ACR build/push for docker', () => {

@@ -142,3 +142,66 @@ flowchart TD
     SubPR -- 5. Merge & Comment --> Monitor
     Monitor -- 6. Success & Deploy --> Done
 ```
+
+---
+
+## 4. Multi-Tenant Agent System (v2.1.0)
+**Module**: `server.js` — `activeAgents` Map  
+**Role**: Concurrent User Session Management
+
+The system supports multiple logged-in users simultaneously. Each OAuth login creates an independent **agent context** stored in an in-memory Map keyed by `userId`.
+
+### Agent Lifecycle
+| Function | Purpose |
+|----------|---------|
+| `registerAgent(user, token, hasCopilot)` | Creates/updates agent on OAuth login |
+| `removeAgent(userId)` | Removes agent on logout |
+| `getAgent(userId)` | Looks up agent by user ID |
+| `getFirstAgent()` | Fallback for single-user mode (polling) |
+| `cleanupStaleAgents()` | Removes agents inactive > 1 hour (runs every 15 min) |
+
+### Agent Context Shape
+```javascript
+{
+  userId, token, user: { id, login, name, avatar_url, copilot_enabled },
+  tickets: [], logs: [], lastActivity: Date.now(), registeredAt: Date.now()
+}
+```
+
+### API Response (`/api/status`)
+- `myAgent` — Current session user's agent context (no token exposed)
+- `allAgents` — Sanitized list of all active agents
+- `activeAgentsCount` — Total active agent count
+
+### Dashboard
+- Header displays agent count badge when > 1 user is logged in
+- User avatar + login name shown for the current OAuth user
+- Poll loop uses `getFirstAgent()` token when `activeUserToken` is null
+
+---
+
+## 5. Live Dashboard
+**Runtime**: `public/index.html`  
+**Role**: Real-Time Monitoring UI
+
+### Features
+- **Timer/Phase Indicator**: Shows current phase (Scanning, Processing, Waiting, Paused)
+- **Terminal Feed**: Live scrolling logs from ticket processing
+- **Inspection Panel**: INS board tickets fetched on independent 60-second timer
+- **Pause/Resume Toggle**: Stops/starts ticket processing without logout
+- **Agent Badge**: Shows active agent count in header (multi-tenant)
+- **Copilot Banner**: Indicates if GitHub Copilot is enabled for the session
+
+---
+
+> [!IMPORTANT]
+> ## 📋 Changelog Reminder
+> **Every major update or implementation MUST be documented in [`CHANGELOG.md`](../CHANGELOG.md).**
+>
+> Before merging or deploying any significant change:
+> 1. Open `CHANGELOG.md` in the project root
+> 2. Add a new entry under `## [Unreleased]` or create a new version section
+> 3. Categorize changes as **Added**, **Changed**, **Fixed**, or **Removed**
+> 4. Include a brief, clear description of what changed and why
+>
+> This ensures all stakeholders can track the evolution of the system.

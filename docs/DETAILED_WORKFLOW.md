@@ -1,7 +1,7 @@
 # System Architecture & Workflow Specification
 
 **Project:** Sentinel DevOps Orchestrator  
-**Version:** 1.0.0  
+**Version:** 2.1.0  
 **Document Type:** Architecture Overview  
 
 ---
@@ -186,7 +186,7 @@ graph TD
 
 ### Phase 1: Ingestion & Analysis
 1.  **Polling**: The system wakes up every 30 seconds and queries the Jira API for tickets in the "To Do" column.
-    *   **Authentication**: Uses the per-user OAuth token (if available) or service account for API access.
+    *   **Authentication**: Uses the multi-tenant agent system (`activeAgents` Map). The poll loop picks the first available agent token via `getFirstAgent()`, falling back to the deprecated `activeUserToken` if set. Each logged-in user registers an independent agent context on OAuth callback.
 2.  **Analysis**:
     *   **Project Detection**: Reads the detected repository to identify the tech stack (e.g., `package.json` for Node, `pom.xml` for Java).
     *   **Requirement Parsing**: Extracts key requirements from the Jira ticket description.
@@ -230,5 +230,7 @@ graph TD
 | **GitHub Copilot hallucinations**| The Copilot-generated code has invalid syntax. | **Caught by CI**: The GitHub Action build will fail. Phase 3 logic takes over (Alert Human). |
 | **Merge Conflict** | GitHub API returns `409 Conflict`. | **Human Escalation**: The system flags the ticket in Jira, stopping the automation for that specific item. |
 | **Network Flakiness** | GitHub/Jira requests time out. | **Retry Logic**: All critical API calls have exponential backoff retries (1s, 2s, 4s). |
-| **Orchestrator Crash** | Node.js process exits. | **Restart**: If blocked by Docker/PM2, it auto-restarts. On boot, it rescans Jira and picks up where it left off (idempotent design). |
+| **Orchestrator Crash** | Node.js process exits. | **Restart**: If backed by Docker/PM2, it auto-restarts. On boot, `reconcileActivePRsOnStartup()` rescans open PRs so monitoring resumes (idempotent design). |
+| **Multiple Users Login** | Two users login simultaneously. | **Multi-Tenant**: Each user gets their own `activeAgents` entry. Poll uses the first available token. Agent contexts are isolated. |
+| **Stale Sessions** | User closes browser without logging out. | **Auto-Cleanup**: `cleanupStaleAgents()` runs every 15 minutes and removes agents inactive > 1 hour. |
 

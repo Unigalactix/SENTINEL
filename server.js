@@ -1188,14 +1188,26 @@ async function startPolling() {
                 return;
             }
 
-            // Check if user is logged in - require OAuth for all GitHub operations
-            if (!systemStatus.activeUserToken) {
+            // Check if any user is logged in - require OAuth for all GitHub operations
+            // Use multi-tenant activeAgents, fallback to deprecated activeUserToken
+            const agent = getFirstAgent();
+            const activeToken = agent?.token || systemStatus.activeUserToken;
+
+            if (!activeToken) {
                 systemStatus.currentPhase = 'Waiting for Login';
                 systemStatus.currentTicketKey = 'LOGIN_REQUIRED';
                 systemStatus.currentTicketLogs = ['⚠️ Please login with GitHub to start processing tickets'];
                 systemStatus.nextScanTime = Date.now() + POLL_INTERVAL_MS;
                 setTimeout(poll, POLL_INTERVAL_MS);
                 return;
+            }
+
+            // Ensure activeUserToken is set for legacy code that uses it
+            if (agent?.token && !systemStatus.activeUserToken) {
+                systemStatus.activeUserToken = agent.token;
+                systemStatus.activeUser = agent.user;
+                setActiveToken(agent.token);
+                console.log(`[Poll] Using token from agent ${agent.user.login}`);
             }
 
             // PHASE: Scanning

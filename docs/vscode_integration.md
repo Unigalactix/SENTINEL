@@ -18,7 +18,7 @@ Once connected, Copilot can:
 
 ### 1. Locate your Absolute Path
 You need the full path to the `mcpServer.js` file.
-*   **Windows Example**: `C:\Users\RajeshKodaganti(Quad\Downloads\GITHUB\AUTOMATION\mcpServer.js`
+*   **Windows Example**: `C:\Users\RajeshKodaganti(Quad\Downloads\GITHUB\SENTINEL\mcpServer.js`
 *   **Mac/Linux Example**: `/Users/username/github/automation/mcpServer.js`
 
 ### 2. Add MCP Server to GitHub Copilot Chat
@@ -31,7 +31,7 @@ Use either the Settings UI or settings JSON. Both approaches are equivalent.
   3. Add a new MCP server:
      - Name: `sentinel`
      - Command: `node`
-     - Args: `C:\\Users\\RajeshKodaganti(Quad\\Downloads\\GITHUB\\AUTOMATION\\mcpServer.js`
+     - Args: `C:\\Users\\RajeshKodaganti(Quad\\Downloads\\GITHUB\\SENTINEL\\mcpServer.js`
      - Env → `PATH`: `C:\\Program Files\\nodejs;${env:PATH}`
      - Disabled: `false`
      - Always Allow: `[]`
@@ -44,7 +44,7 @@ Use either the Settings UI or settings JSON. Both approaches are equivalent.
     "sentinel": {
       "command": "node",
       "args": [
-        "C:\\Users\\RajeshKodaganti(Quad\\Downloads\\GITHUB\\AUTOMATION\\mcpServer.js"
+        "C:\\Users\\RajeshKodaganti(Quad\\Downloads\\GITHUB\\SENTINEL\\mcpServer.js"
       ],
       "env": {
         "PATH": "C:\\Program Files\\nodejs;${env:PATH}"
