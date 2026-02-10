@@ -253,34 +253,49 @@ async function getProjects() {
 /**
  * Create a new Jira issue
  */
-async function createIssue(projectKey, summary, description, issueType = 'Task') {
+async function createIssue(projectKey, summary, description, issueType = 'Task', options = {}) {
     try {
-        const body = {
-            fields: {
-                project: {
-                    key: projectKey
-                },
-                summary: summary,
-                description: {
-                    type: "doc",
-                    version: 1,
-                    content: [
-                        {
-                            type: "paragraph",
-                            content: [
-                                {
-                                    type: "text",
-                                    text: description
-                                }
-                            ]
-                        }
-                    ]
-                },
-                issuetype: {
-                    name: issueType
-                }
+        const fields = {
+            project: {
+                key: projectKey
+            },
+            summary: summary,
+            description: {
+                type: "doc",
+                version: 1,
+                content: [
+                    {
+                        type: "paragraph",
+                        content: [
+                            {
+                                type: "text",
+                                text: description
+                            }
+                        ]
+                    }
+                ]
+            },
+            issuetype: {
+                name: issueType
             }
         };
+
+        // Optional priority e.g. "High", "Medium", "Low"
+        if (options.priorityName) {
+            fields.priority = { name: options.priorityName };
+        }
+
+        // Optional Jira labels
+        if (Array.isArray(options.labels) && options.labels.length > 0) {
+            fields.labels = options.labels;
+        }
+
+        // Optional raw extra fields (for customfields, etc.)
+        if (options.extraFields && typeof options.extraFields === 'object') {
+            Object.assign(fields, options.extraFields);
+        }
+
+        const body = { fields };
 
         const result = await jiraRequest('/rest/api/3/issue', 'POST', body);
         console.log(`Created Jira ticket: ${result.key}`);

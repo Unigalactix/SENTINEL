@@ -32,7 +32,7 @@ const {
     checkCopilotStatus    // [NEW]
 } = require('./src/services/githubService');
 const githubService = require('./src/services/githubService');
-const { getPendingTickets, transitionIssue, addComment, getIssueDetails, getInspectionTickets } = require('./src/services/jiraService');
+const { getPendingTickets, transitionIssue, addComment, getIssueDetails, getInspectionTickets, createIssue } = require('./src/services/jiraService');
 const llmService = require('./src/services/llmService'); // [NEW]
 require('dotenv').config();
 
@@ -81,6 +81,7 @@ let systemStatus = {
     currentPayload: null,      // New: Generated YAML content
     nextScanTime: Date.now() + 1000,
     paused: false,             // Pause state
+    systemLogs: [],            // Global system log stream for UI terminal
     // Per-user auth state (DEPRECATED - use activeAgents instead)
     activeUserToken: null,     // OAuth token from logged-in user
     activeUser: null           // User info from logged-in user
@@ -183,6 +184,20 @@ function writeLog(message) {
     fs.appendFile(logFile, cleanMessage, (err) => {
         if (err) console.error('Failed to write to log file:', err);
     });
+
+    // Also keep an in-memory rolling buffer for the UI terminal
+    try {
+        if (!Array.isArray(systemStatus.systemLogs)) {
+            systemStatus.systemLogs = [];
+        }
+        systemStatus.systemLogs.push(cleanMessage.trimEnd());
+        // Keep last 200 lines to avoid unbounded growth
+        if (systemStatus.systemLogs.length > 200) {
+            systemStatus.systemLogs.splice(0, systemStatus.systemLogs.length - 200);
+        }
+    } catch (e) {
+        // Never let logging crash the app
+    }
 }
 
 const session = require('express-session');
@@ -208,7 +223,9 @@ app.get('/api/auth/status', (req, res) => {
         return res.json({
             authenticated: true,
             user: req.session.user,
-            authMethod: req.session.authMethod || 'oauth'
+            authMethod: req.session.authMethod || 'oauth',
+            hasOAuth: config.hasOAuth,
+            hasGitHubApp: config.hasGitHubApp
         });
     }
     // Check if GitHub App is configured (no login needed)
@@ -216,7 +233,9 @@ app.get('/api/auth/status', (req, res) => {
         return res.json({
             authenticated: true,
             authMethod: 'github-app',
-            user: { login: 'Sentinel [bot]', type: 'Bot' }
+            user: { login: 'Sentinel [bot]', type: 'Bot' },
+            hasOAuth: config.hasOAuth,
+            hasGitHubApp: config.hasGitHubApp
         });
     }
     return res.json({
@@ -456,6 +475,11 @@ app.post('/api/poll', (req, res) => {
 
 // --- API for Config (Secrets) ---
 app.post('/api/config', (req, res) => {
+    // Editing .env at runtime is only supported in non-production environments.
+    if (process.env.NODE_ENV === 'production') {
+        return res.status(403).json({ error: 'Runtime config editing is disabled in production.' });
+    }
+
     const secrets = req.body; // Expect { JIRA_BASE_URL: "...", ... }
 
     if (!secrets || Object.keys(secrets).length === 0) {
@@ -523,6 +547,13 @@ app.post('/api/pause', (req, res) => {
 
 // --- On-Demand MCP Inspector ---
 app.post('/api/inspector', (req, res) => {
+    // The MCP Inspector is a developer tool that shells out to npx and
+    // attempts to open a browser. This is not suitable for production
+    // container environments, so we guard it behind NODE_ENV.
+    if (process.env.NODE_ENV === 'production') {
+        return res.status(403).json({ error: 'MCP Inspector is disabled in production.' });
+    }
+
     console.log('[API] Launching MCP Inspector on demand...');
     try {
         const { spawn } = require('child_process');
@@ -680,6 +711,54 @@ app.post('/api/inspect', async (req, res) => {
             systemStatus.currentPhase = 'Waiting';
             systemStatus.currentTicketKey = null;
         }, 5000);
+    }
+});
+
+// --- API: Create Jira Ticket (KAN project) ---
+app.post('/api/tickets', async (req, res) => {
+    try {
+        const { block, title, repoName, description, priority } = req.body || {};
+
+        if (!title || !repoName) {
+            return res.status(400).json({ error: 'title and repoName are required' });
+        }
+
+        const projectKey = process.env.JIRA_CREATE_PROJECT_KEY || 'KAN';
+
+        const safeBlock = (block || '').trim();
+        const summaryParts = [];
+        if (safeBlock) summaryParts.push(`[${safeBlock}]`);
+        summaryParts.push(title.trim());
+        const summary = summaryParts.join(' ');
+
+        const descLines = [];
+        descLines.push(`Repository: ${repoName}`);
+        if (safeBlock) descLines.push(`Block: ${safeBlock}`);
+        descLines.push('');
+        if (description && description.trim()) {
+            descLines.push(description.trim());
+        }
+
+        const fullDescription = descLines.join('\n');
+
+        const priorityName = (priority || 'Medium').trim();
+
+        const issue = await createIssue(projectKey, summary, fullDescription, 'Task', {
+            priorityName
+        });
+
+        const url = `${process.env.JIRA_BASE_URL}/browse/${issue.key}`;
+
+        logProgress(`Created Jira ticket from UI: ${issue.key} (${projectKey}) for repo ${repoName}`);
+
+        res.json({
+            key: issue.key,
+            url,
+            projectKey
+        });
+    } catch (e) {
+        console.error('[API] Failed to create Jira ticket from UI:', e.message);
+        res.status(500).json({ error: e.message || 'Failed to create ticket' });
     }
 });
 
@@ -1108,16 +1187,16 @@ async function applyCopilotFixes({ files = [], prompt = '' }) {
 
 // --- Polling Loop (Sentinel Mode) ---
 async function startPolling() {
-    console.log('--- Starting Sentinel Polling ---');
+    writeLog('--- Starting Sentinel Polling ---');
 
     // On startup, reconcile open PRs across the org and resume monitoring
     async function reconcileActivePRsOnStartup() {
         try {
             const org = process.env.GHUB_ORG || 'Unigalactix';
-            console.log(`[Sentinel] Reconciling active PRs in org: ${org}`);
+            writeLog(`[Sentinel] Reconciling active PRs in org: ${org}`);
             const prs = await getActiveOrgPRsWithJiraKeys({ org });
             if (!Array.isArray(prs) || prs.length === 0) {
-                console.log('[Sentinel] No open PRs with Jira keys found to reconcile.');
+                writeLog('[Sentinel] No open PRs with Jira keys found to reconcile.');
                 return;
             }
             for (const pr of prs) {
@@ -1159,16 +1238,16 @@ async function startPolling() {
                     };
                     systemStatus.scanHistory.unshift(historyItem);
                     systemStatus.monitoredTickets.push(historyItem);
-                    console.log(`[Sentinel] Resumed monitoring PR ${pr.prUrl} for ticket ${issueKey}.`);
+                    writeLog(`[Sentinel] Resumed monitoring PR ${pr.prUrl} for ticket ${issueKey}.`);
                     try {
                         await addComment(issueKey, `🔁 Server restarted: resuming monitoring for active PR\nPR: ${pr.prUrl}`);
                     } catch (_) { }
                 } catch (e) {
-                    console.warn(`[Sentinel] Failed to reconcile ${issueKey}: ${e.message}`);
+                    writeLog(`[Sentinel] Failed to reconcile ${issueKey}: ${e.message}`);
                 }
             }
         } catch (e) {
-            console.error('[Sentinel] Reconciliation error:', e.message);
+            writeLog(`[Sentinel] Reconciliation error: ${e.message}`);
         }
     }
 
@@ -1208,7 +1287,7 @@ async function startPolling() {
                 systemStatus.activeUserToken = agent.token;
                 systemStatus.activeUser = agent.user;
                 setActiveToken(agent.token);
-                console.log(`[Poll] Using token from agent ${agent.user.login}`);
+                writeLog(`[Poll] Using token from agent ${agent.user.login}`);
             }
 
             // PHASE: Scanning
@@ -1219,12 +1298,12 @@ async function startPolling() {
                 // systemStatus.currentTicketLogs = []; // Optional: clear logs between scans
             }
 
-            console.log('Polling for new tickets...');
+            writeLog('Polling for new tickets...');
 
             let issues = await getPendingTickets();
 
             if (issues.length > 0) {
-                console.log(`Found ${issues.length} pending tickets.`);
+                writeLog(`Found ${issues.length} pending tickets.`);
 
                 // Populate Queue
                 systemStatus.activeTickets = issues.map(i => ({
@@ -1239,10 +1318,10 @@ async function startPolling() {
                     await processTicketData(issue);
                 }
             } else {
-                console.log('No tickets found.');
+                writeLog('No tickets found.');
             }
         } catch (error) {
-            console.error('Polling error:', error.message);
+            writeLog(`Polling error: ${error.message}`);
         } finally {
             // PHASE: Waiting
             systemStatus.currentPhase = 'Waiting';
@@ -1294,7 +1373,7 @@ async function startPolling() {
                                 if (!isWorkInProgress) {
                                     // If it's a draft, we must undraft it before merging (using pulls.merge)
                                     if (subPr.draft) {
-                                        console.log(`[Sentinel] SubPR #${subPr.number} is Draft. Mark as Ready for Review...`);
+                                        writeLog(`[Sentinel] SubPR #${subPr.number} is Draft. Mark as Ready for Review...`);
                                         await markPullRequestReadyForReview({ repoName: ticket.repoName, pullNumber: subPr.number });
                                         ticket.toolUsed = "Autopilot + Undraft"; // [NEW] Track tool usage
                                     } else {
@@ -1302,7 +1381,7 @@ async function startPolling() {
                                     }
 
                                     // [NEW] Auto-Approve the PR
-                                    console.log(`[Sentinel] Auto-approving SubPR #${subPr.number}...`);
+                                    writeLog(`[Sentinel] Auto-approving SubPR #${subPr.number}...`);
                                     await approvePullRequest({ repoName: ticket.repoName, pullNumber: subPr.number });
 
                                     // Enable GitHub Auto-Merge on the sub PR
@@ -1318,10 +1397,10 @@ async function startPolling() {
                                             ticket.copilotMergedAt = new Date().toISOString();
                                         }
                                     } else {
-                                        console.log(`[Sentinel] ⚠️ Auto-merge enable failed for SubPR #${subPr.number}: ${autoRes.message}`);
+                                        writeLog(`[Sentinel] ⚠️ Auto-merge enable failed for SubPR #${subPr.number}: ${autoRes.message}`);
 
                                         // Fallback: If Auto-Merge fails (e.g. "clean status" which implies ready, or not protected), try immediate merge
-                                        console.log(`[Sentinel] Attempting immediate merge for SubPR #${subPr.number} as fallback...`);
+                                        writeLog(`[Sentinel] Attempting immediate merge for SubPR #${subPr.number} as fallback...`);
                                         const mergeRes = await mergePullRequest({ repoName: ticket.repoName, pullNumber: subPr.number, method: 'squash' });
                                         if (mergeRes.merged) {
                                             ticket.copilotMerged = true;
@@ -1332,7 +1411,7 @@ async function startPolling() {
                                 }
                             }
                         } catch (e) {
-                            console.error(`Status check error for ${ticket.key}:`, e.message);
+                            writeLog(`Status check error for ${ticket.key}: ${e.message}`);
                         }
                     }
 
@@ -1344,7 +1423,7 @@ async function startPolling() {
                 }
             }
         } catch (e) {
-            console.error('Monitoring error:', e.message);
+            writeLog(`Monitoring error: ${e.message}`);
         } finally {
             setTimeout(monitorChecks, 15000);
         }
@@ -1358,20 +1437,20 @@ async function startPolling() {
 }
 
 app.listen(PORT, async () => {
-    console.log(`Server running on port ${PORT}`);
+    writeLog(`Server running on port ${PORT}`);
 
     // Verify Env
     const ghToken = process.env.GHUB_TOKEN;
     const jiraProject = process.env.JIRA_PROJECT_KEY;
     const copilotEnabled = process.env.USE_GH_COPILOT; // Just log it
 
-    console.log(`GitHub Token present: ${!!ghToken}`);
-    console.log(`Jira Project: ${jiraProject}`);
-    console.log(`GH Copilot enabled: ${copilotEnabled}`);
+    writeLog(`GitHub Token present: ${!!ghToken}`);
+    writeLog(`Jira Project: ${jiraProject}`);
+    writeLog(`GH Copilot enabled: ${copilotEnabled}`);
 
     // Allow global trigger
     global.forcePoll = async () => {
-        console.log('Forcing poll...');
+        writeLog('Forcing poll...');
         // We can't actually force the inner loop easily without refactor.
         // Assuming the loop is running, we just wait.
         // Real implementation would reset timer.

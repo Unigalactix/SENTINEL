@@ -1,30 +1,49 @@
 const { AzureOpenAI } = require("openai");
 const { zodToJsonSchema } = require("zod-to-json-schema");
-const tools = require("../tools/definitions"); // [NEW] Shared tools
+const tools = require("../tools/definitions"); // Shared tools
 require("dotenv").config();
 
 class LLMService {
     constructor() {
         this.client = null;
-        this.deployment = process.env.LLM_DEPLOYMENT_NAME // Corrected form
-            ? process.env.LLM_DEPLOYMENT_NAME.replace(/^"|"$/g, '')
-            : 'gpt-5.2-chat';
+
+        // Support both legacy LLM_* and Azure-style AZURE_OPENAI_* env vars
+        const deploymentEnv =
+            process.env.LLM_DEPLOYMENT_NAME ||
+            process.env.AZURE_OPENAI_DEPLOYMENT ||
+            'gpt-5.2-chat';
+
+        this.deployment = deploymentEnv.replace(/^"|"$/g, '');
 
         this.init();
     }
 
     init() {
         try {
-            if (process.env.LLM_API_KEY && process.env.LLM_ENDPOINT) {
+            const apiKey =
+                process.env.LLM_API_KEY ||
+                process.env.AZURE_OPENAI_API_KEY;
+
+            const endpointRaw =
+                process.env.LLM_ENDPOINT ||
+                process.env.AZURE_OPENAI_ENDPOINT;
+
+            if (apiKey && endpointRaw) {
+                const endpoint = endpointRaw.replace(/^"|"$/g, '');
+                const apiVersion =
+                    process.env.LLM_API_VERSION ||
+                    process.env.AZURE_OPENAI_API_VERSION ||
+                    "2024-02-15-preview";
+
                 this.client = new AzureOpenAI({
-                    apiKey: process.env.LLM_API_KEY,
-                    endpoint: process.env.LLM_ENDPOINT.replace(/^"|"$/g, ''),
-                    apiVersion: process.env.LLM_API_VERSION || "2024-02-15-preview",
+                    apiKey,
+                    endpoint,
+                    apiVersion,
                     deployment: this.deployment
                 });
                 console.log('[LLMService] Azure OpenAI client initialized.');
             } else {
-                console.warn('[LLMService] Missing Azure OpenAI credentials in .env');
+                console.warn('[LLMService] Missing Azure OpenAI credentials in environment (expected LLM_* or AZURE_OPENAI_* vars).');
             }
         } catch (e) {
             console.error('[LLMService] Failed to initialize client:', e);
