@@ -5,10 +5,6 @@
 **Risk:** Restarting the server logs out all users and loses active agent contexts.
 **Suggestion:** Implement Redis or a database (PostgreSQL/MongoDB) store for `express-session` and link it to the agent system.
 
-## 2. Token Refresh Logic
-**Issue:** GitHub OAuth tokens may expire. The current system logs a 401 error but does not automatically refresh the token.
-**Suggestion:** Implement a token refresh flow using the refresh token provided during the initial OAuth handshake.
-
 ## 3. Rate Limiting
 **Issue:** No explicit handling for GitHub API rate limits.
 **Suggestion:** Add `octokit-plugin-throttling` to automatically handle secondary rate limits and back off.
@@ -108,6 +104,14 @@
 - Introduce explicit environment profiles (development, staging, production) with separate config files or env var prefixes.
 - In production, tighten security (HTTPS-only cookies, secure session flags, stricter CORS) and reduce log verbosity.
 - Provide example Docker Compose or Kubernetes manifests showing a recommended production topology (API + worker + Redis/DB).
+
+
+## IMPLEMENTED
+-------------------------------------------------------------------------------------------------------------
+
+## 2. Token Refresh Logic
+**Issue:** GitHub OAuth tokens may expire. The current system logs a 401 error but does not automatically refresh the token.
+**Suggestion:** Implement a token refresh flow using the refresh token provided during the initial OAuth handshake.
 
 ## 18. UX for First-Time Setup
 **Issue:** New users need to understand how to connect Jira, GitHub, and the GitHub App correctly.
