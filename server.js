@@ -31,6 +31,7 @@ const {
     checkAppInstallation, // [NEW]
     checkCopilotStatus    // [NEW]
 } = require('./src/services/githubService');
+const githubService = require('./src/services/githubService');
 const { getPendingTickets, transitionIssue, addComment, getIssueDetails, getInspectionTickets } = require('./src/services/jiraService');
 const llmService = require('./src/services/llmService'); // [NEW]
 require('dotenv').config();
