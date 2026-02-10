@@ -45,14 +45,16 @@ flowchart LR
 | Feature | Description |
 |---------|-------------|
 | **Auto-Polling** | Scans Jira every 30s for new "To Do" tickets |
-| **Per-User Auth** | Uses GitHub OAuth to perform actions as the logged-in user |
+| **Multi-Tenant Auth** | Multiple users can log in simultaneously, each with isolated agent contexts |
+| **Per-User OAuth** | Uses GitHub OAuth to perform actions as the logged-in user |
 | **AI Analysis** | Uses Azure OpenAI to analyze repos and plan fixes |
 | **Smart Detection** | Auto-detects Node/Python/.NET/Java from repo files |
 | **@copilot Integration** | Posts context-aware prompts to trigger GitHub Copilot |
 | **Secret Placeholders** | Uses `${{ secrets.X }}` in workflows—never exposes values |
 | **Sub-PR Management** | Detects, approves, and merges Copilot-generated PRs |
-| **Live Dashboard** | Real-time UI at `http://localhost:3000` |
-| **MCP Server** | Exposes tools for AI agents (Claude, etc.) |
+| **Live Dashboard** | Real-time UI with timer, terminal feed, agent badge, and inspection panel |
+| **Cloud Deployment** | Azure Web App deployment with Docker support |
+| **MCP Server** | Exposes tools for AI agents (Claude, VS Code Copilot) |
 
 ---
 
@@ -136,15 +138,16 @@ npm run start:mcp  # Start MCP server for AI agents
 
 ```
 SENTINEL/
-├── server.js              # Main orchestrator (polling, API)
+├── server.js              # Main orchestrator (polling, API, multi-tenant agents)
 ├── mcpServer.js           # MCP server for AI agents
+├── CHANGELOG.md           # Version history & change tracking
 ├── public/
-│   └── index.html         # Live dashboard UI
+│   └── index.html         # Live dashboard UI (timer, feed, agent badge)
 ├── src/
 │   ├── services/
-│   │   ├── githubService.js   # GitHub API functions
+│   │   ├── githubService.js   # GitHub API (42 exports)
 │   │   ├── authService.js     # OAuth handling
-│   │   ├── jiraService.js     # Jira API (tickets, transitions)
+│   │   ├── jiraService.js     # Jira API (10 exports)
 │   │   ├── llmService.js      # Azure OpenAI integration
 │   │   └── devopsChecks.js    # Repo scanning
 │   └── tools/
@@ -152,9 +155,16 @@ SENTINEL/
 ├── scripts/
 │   └── inspect_repo.js    # Standalone repo inspector
 ├── __tests__/
-│   └── exports.test.js    # Export verification (51 tests)
+│   └── exports.test.js    # Export verification tests
 ├── config/
 │   └── board_post_pr_status.json
+├── docs/                  # Project documentation
+│   ├── agents.md          # Agent architecture & changelog reminder
+│   ├── DETAILED_WORKFLOW.md
+│   ├── PROJECT_REPORT.md
+│   ├── workflow-flow.md
+│   ├── suggestions.md
+│   └── vscode_integration.md
 ├── logs/
 │   └── server.log
 └── Dockerfile             # Container definition
@@ -277,6 +287,12 @@ Add to Claude Desktop's `config.json`:
 | `OAUTH_CLIENT_SECRET` | GitHub OAuth App Client Secret |
 | `JIRA_API_TOKEN` | Jira API Token |
 | `SESSION_SECRET` | Session Encryption Key |
+
+---
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for version history and detailed change tracking.
 
 ---
 

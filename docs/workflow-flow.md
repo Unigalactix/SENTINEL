@@ -16,6 +16,7 @@ flowchart TD
 
   subgraph SERVER[Automation Server]
     S0[Startup]
+    SA[Check activeAgents for Token]
     S1[Poll Jira for To Do]
     S2[Process Ticket Data]
     S3[Analyze Repo & Detect Language]
@@ -54,7 +55,8 @@ flowchart TD
   end
 
   %% Main happy path
-  J1 -->|Sentinel poll| S1 --> S2 --> S3 --> S3A --> S4 --> S5 --> S6 --> S7 --> G1
+  J1 -->|Sentinel poll| SA -->|Agent token found| S1 --> S2 --> S3 --> S3A --> S4 --> S5 --> S6 --> S7 --> G1
+  SA -->|No agents| SA
   S2 -->|Transition| J2
   S7 -->|Comment PR| S8 --> G2
   G1 -->|Triggers| A1 --> A2 --> A3
@@ -72,6 +74,8 @@ flowchart TD
 ```
 
 Key Notes
+- **Multi-Tenant Auth**: Poll loop checks `activeAgents` Map via `getFirstAgent()` before scanning Jira. If no agent token is available, it waits for a user login.
+- **Stale Agent Cleanup**: `cleanupStaleAgents()` runs every 15 minutes, removing agents inactive > 1 hour.
 - Build/Test defaults when missing: `npm run build` / `npm test`.
 - Static-site deploys package only `public/` or a minimal `deploy/` folder; validates `index.html`.
 - Deployment URL published via GitHub Deployments and included in Jira comments.
@@ -79,4 +83,4 @@ Key Notes
 
 How to View
 - GitHub renders Mermaid diagrams natively in Markdown.
-- In VS Code: open docs/workflow-flow.md and use “Open Preview”.
+- In VS Code: open docs/workflow-flow.md and use "Open Preview".

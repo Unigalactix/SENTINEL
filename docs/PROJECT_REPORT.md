@@ -79,6 +79,8 @@ We have built a visual **Dashboard** that runs in your web browser.
     *   **"Processing [Ticket-123]"**: "I'm currently writing code for Ticket 123."
     *   **"Time to Merge: 2m 30s"**: "It took me 2 minutes and 30 seconds to finish that last task."
     *   **Badges**: Small icons showing if the Autopilot worked alone or if a human used a tool to help it.
+    *   **Agent Count**: A badge showing how many users are actively logged in (multi-tenant).
+    *   **Copilot Status**: Indicates if GitHub Copilot is enabled for the session.
 
 ---
 
@@ -87,9 +89,11 @@ We have built a visual **Dashboard** that runs in your web browser.
 While the logic is simple, the technology is robust.
 
 *   **Server (`server.js`)**: The "Brain" running in Node.js that coordinates everything.
+    *   **Multi-Tenant Agents**: Supports multiple concurrent users via `activeAgents` Map. Each OAuth login creates an isolated agent context.
     *   **Agentic AI**: Uses Azure OpenAI to plan fixes and specific workflows.
     *   **Intelligence**: Can optionally use `gh copilot` CLI to generate code fixes.
     *   **Authentication**: Uses **GitHub OAuth** to perform actions on behalf of the logged-in user (Per-User Security).
+    *   **Cloud Ready**: Deployable to Azure Web App via Docker.
 *   **LLM Service (`llmService.js`)**: The "Cognitive Engine" connecting to Azure OpenAI.
 *   **GitHub Service (`githubService.js`)**: The "Librarian" that knows how to speak to GitHub's complex API.
 *   **Jira Service (`jiraService.js`)**: The "Messenger" that translates code updates into business updates on Jira.
@@ -105,7 +109,7 @@ While the logic is simple, the technology is robust.
 
 ### System Architecture & Execution Flow
 
-This diagram illustrates how the different scripts in the `AUTOMATION` folder interact.
+This diagram illustrates how the different scripts in the `SENTINEL` folder interact.
 
 ```mermaid
 graph TD

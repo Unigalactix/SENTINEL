@@ -37,3 +37,6 @@ Thumbs.db
 
 # Brain Artifacts (if stored locally)
 .gemini
+
+# Testing Artifacts
+test_results.json
