@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [2.1.0] - 2026-02-09
 
 ### Added
+- **UI Documentation**: README now includes a **Screenshots** section that references images in `docs/ui/*` (dashboard, login/install, logs, sidebar). When updating the UI, also refresh these screenshots so the docs stay visually accurate.
 - **Multi-Tenant Agent System**: Replaced single global `activeUserToken` with `activeAgents` Map for concurrent user support
   - `registerAgent()`, `removeAgent()`, `getAgent()`, `getFirstAgent()` lifecycle functions
   - `cleanupStaleAgents()` runs every 15 minutes, removes agents inactive for 1 hour

@@ -40,6 +40,26 @@ flowchart LR
 
 ---
 
+## Screenshots
+
+> UI references – capture your own screenshots and save them under `docs/ui/` using the filenames below.
+
+- **Dashboard Overview**  
+    ![Sentinel Dashboard](docs/ui/dashboard-overview.png)
+
+- **Login & Install Flow**  
+    ![GitHub Login & App Install](docs/ui/login-install-flow.png)
+
+- **Ticket Processing & Logs**  
+    ![Real-time Ticket Logs](docs/ui/ticket-processing-logs.png)
+
+- **Sidebar Status Panel**  
+    ![Connection & Agent Status](docs/ui/sidebar-status-panel.png)
+
+These images are not committed by default; when updating the UI, also refresh the corresponding screenshot in `docs/ui/` so new users can see the latest experience.
+
+---
+
 ## Key Features
 
 | Feature | Description |
