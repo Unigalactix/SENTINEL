@@ -6,8 +6,8 @@ require("dotenv").config();
 class LLMService {
     constructor() {
         this.client = null;
-        this.deployment = process.env.LLM_DEPLOYEMENT_NAME // Using the env var exactly as found (typo included)
-            ? process.env.LLM_DEPLOYEMENT_NAME.replace(/^"|"$/g, '')
+        this.deployment = process.env.LLM_DEPLOYMENT_NAME // Corrected form
+            ? process.env.LLM_DEPLOYMENT_NAME.replace(/^"|"$/g, '')
             : 'gpt-5.2-chat';
 
         this.init();

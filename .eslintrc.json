@@ -1,21 +1,18 @@
 {
     "env": {
         "node": true,
-        "es2022": true,
+        "es2021": true,
         "jest": true
     },
+    "extends": [
+        "eslint:recommended"
+    ],
     "parserOptions": {
-        "ecmaVersion": 2022
+        "ecmaVersion": 12
     },
     "rules": {
-        "no-duplicate-imports": "error",
-        "no-redeclare": "error",
-        "no-unused-vars": [
-            "warn",
-            {
-                "argsIgnorePattern": "^_"
-            }
-        ],
-        "no-undef": "error"
+        "no-unused-vars": "warn",
+        "no-undef": "error",
+        "no-console": "off"
     }
 }
