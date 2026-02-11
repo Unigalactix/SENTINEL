@@ -56,20 +56,6 @@
 - Classify errors into transient vs permanent, and only retry transient ones.
 - Surface retry information in the UI so users know when Sentinel is still trying vs when a ticket is marked failed.
 
-## 11. UI: Real-Time Updates & Filtering
-**Issue:** The dashboard is driven by periodic polling and gets crowded as history grows.
-**Suggestion:**
-- Consider upgrading to WebSockets or Server-Sent Events for near real-time pushes from the server to the browser.
-- Add filters on the Kanban and history views (by project, priority, status, date range, agent) so users can focus on relevant tickets.
-- Provide a detail panel for a selected ticket with full timeline: Jira transitions, workflow runs, Copilot actions, and comments.
-
-## 12. UI: Error States & Guidance
-**Issue:** Some error states are only visible in logs or as brief banners.
-**Suggestion:**
-- Add clear, persistent banners when OAuth is misconfigured, GitHub App is missing permissions, or Jira credentials fail.
-- Link those banners directly to setup docs or a "Configuration" section describing required env vars and scopes.
-- In the log terminal, visually distinguish warnings vs errors using color and icons.
-
 ## 13. Security & Secrets Management
 **Issue:** The app relies on environment variables and in-memory tokens without a dedicated secrets strategy.
 **Suggestion:**
@@ -118,5 +104,23 @@
 **Suggestion:**
 - Expand the onboarding flow in the UI: a short checklist or wizard that walks through OAuth, GitHub App installation, and Jira project selection.
 - Add more visual cues in the dashboard showing which integrations are active and which steps remain.
+
+## 11. UI: Real-Time Updates & Filtering
+**Issue:** The dashboard is driven by periodic polling and gets crowded as history grows.
+**Suggestion:**
+- Consider upgrading to WebSockets or Server-Sent Events for near real-time pushes from the server to the browser.
+- Add filters on the Kanban and history views (by project, priority, status, date range, agent) so users can focus on relevant tickets.
+- Provide a detail panel for a selected ticket with full timeline: Jira transitions, workflow runs, Copilot actions, and comments.
+
+## 12. UI: Error States & Guidance
+**Status:** Implemented (UI layer)
+
+**What was added:**
+- Persistent configuration banners in the dashboard for:
+	- Missing GitHub OAuth configuration (links to README env setup).
+	- Missing Sentinel GitHub App installation (links to the GitHub App install page).
+	- Jira configuration failures detected when loading project keys (links directly to the in-app configuration sidebar).
+- A Copilot capability banner that appears when the active user does not have GitHub Copilot enabled.
+- Enhanced log terminal rendering that visually differentiates info, warnings, and errors using color and icons.
 
 These improvements should help make Sentinel more reliable, easier to operate in production, and friendlier for new users while preserving its current architecture.

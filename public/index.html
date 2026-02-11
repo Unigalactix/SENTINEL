@@ -266,10 +266,41 @@
 
         /* Copilot Warning Banner Structure */
         #copilotWarning {
-            display: none;
-            /* Controlled by JS */
+            display: none; /* Controlled by JS */
         }
 
+        /* Generic alert banners */
+        .alert-banner {
+            background: rgba(15, 23, 42, 0.9);
+            border-radius: 12px;
+            border: 1px solid var(--glass-border);
+            padding: 10px 14px;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            font-size: 0.9rem;
+        }
+
+        .alert-error {
+            background: rgba(220, 38, 38, 0.18);
+            border-color: rgba(220, 38, 38, 0.6);
+            color: #fecaca;
+        }
+
+        .alert-warn {
+            background: rgba(245, 158, 11, 0.15);
+            border-color: rgba(245, 158, 11, 0.6);
+            color: #fed7aa;
+        }
+
+        .alert-link {
+            color: var(--primary);
+            text-decoration: underline;
+            font-size: 0.85rem;
+            white-space: nowrap;
+        }
 
         /* Glass Utility Class */
         .glass-panel {
@@ -303,13 +334,12 @@
 
         /* Copilot Warning Banner */
         #copilotWarning {
-            display: none;
             background: rgba(220, 38, 38, 0.2);
             border: 1px solid rgba(220, 38, 38, 0.4);
             color: #fca5a5;
             padding: 12px 24px;
             border-radius: 12px;
-            margin-bottom: 20px;
+            margin-bottom: 10px;
             align-items: center;
             justify-content: space-between;
             backdrop-filter: blur(10px);
@@ -560,10 +590,22 @@
             transition: opacity 0.2s;
         }
 
+        .log-entry.warn {
+            color: #facc15;
+        }
+
+        .log-entry.error {
+            color: #fb7185;
+        }
+
         .log-entry:last-child {
             opacity: 1;
             font-weight: 600;
             text-shadow: 0 0 8px rgba(126, 231, 135, 0.3);
+        }
+
+        .log-icon {
+            margin-right: 6px;
         }
 
         /* --- Kanban Board --- */
@@ -1263,20 +1305,41 @@
                     <span id="sb-monitored-count" class="sidebar-subtext">0</span>
                 </div>
             </div>
+
+            <!-- Setup Checklist for First-Time Users (relocated into sidebar) -->
+            <div id="setupChecklist" class="glass-panel setup-panel">
+                <div class="setup-header">
+                    <div class="setup-title">First-Time Setup</div>
+                    <div class="setup-progress" id="setupProgressText">3 steps remaining</div>
+                </div>
+                <div class="setup-steps" id="setupStepsBody">
+                    <!-- Populated by JavaScript based on auth and Jira project state -->
+                </div>
+            </div>
+
+            <!-- Global Alerts (configuration, Copilot, Jira) relocated into sidebar -->
+            <div id="globalAlerts">
+                <div id="bannerOAuth" class="alert-banner alert-error" style="display:none;">
+                    <span><strong>GitHub OAuth is not configured.</strong> Set <code>OAUTH_CLIENT_ID</code> and <code>OAUTH_CLIENT_SECRET</code> on the server.</span>
+                    <a class="alert-link" href="https://github.com/Unigalactix/SENTINEL#2-configure-env" target="_blank">Open setup docs</a>
+                </div>
+                <div id="bannerGitHubApp" class="alert-banner alert-error" style="display:none;">
+                    <span><strong>Sentinel GitHub App is not installed.</strong> Install the app to allow PR and workflow automation.</span>
+                    <a class="alert-link" href="https://github.com/apps/sentinel-devops-automation-agent" target="_blank">Install GitHub App</a>
+                </div>
+                <div id="bannerJira" class="alert-banner alert-error" style="display:none;">
+                    <span><strong>Jira configuration appears invalid.</strong> Check base URL, email, and API token.</span>
+                    <a class="alert-link" href="#secretsSidebar" onclick="toggleSecretsSidebar(); return false;">Open configuration</a>
+                </div>
+                <div id="copilotWarning" class="alert-banner alert-warn" style="display:none;">
+                    <span><strong>GitHub Copilot is not enabled for this account.</strong> Sentinel will still create PRs, but cannot delegate code edits to Copilot.</span>
+                    <a class="alert-link" href="https://github.com/features/copilot" target="_blank">Enable Copilot</a>
+                </div>
+            </div>
         </aside>
 
         <div class="container" id="mainContent">
-        
-        <!-- Setup Checklist for First-Time Users -->
-        <div id="setupChecklist" class="glass-panel setup-panel">
-            <div class="setup-header">
-                <div class="setup-title">First-Time Setup</div>
-                <div class="setup-progress" id="setupProgressText">3 steps remaining</div>
-            </div>
-            <div class="setup-steps" id="setupStepsBody">
-                <!-- Populated by JavaScript based on auth and Jira project state -->
-            </div>
-        </div>
+
         <header>
             <div class="board-title">
                 <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
@@ -1586,10 +1649,13 @@
         // --- Onboarding State ---
         let onboardingProjects = [];
         let selectedJiraProject = null;
+        let jiraConfigError = false;
 
         // --- Polling / Timer State ---
         const UI_POLL_INTERVAL_SECONDS = 30; // mirror server POLL_INTERVAL_MS
         let nextScanEta = null; // client-side estimate of next scan time
+        let statusPollInterval = null;
+        let statusEventSource = null;
 
         async function checkAuthStatus() {
             try {
@@ -1605,11 +1671,18 @@
                     updateUserDisplay();
                     renderSidebar(null, authStatusSnapshot);
 
+                    // Initial configuration banners once signed in
+                    updateConfigBanners(null, authStatusSnapshot);
+
                     // Load setup checklist data once user is authenticated
                     ensureOnboardingProjectsLoaded();
                     updateOnboardingPanel(null, authStatusSnapshot);
                 } else {
                     showLoginScreen();
+                    // Show clear guidance when OAuth is not configured
+                    if (data.hasOAuth === false) {
+                        showLoginError('GitHub OAuth is not configured on this server. Set OAUTH_CLIENT_ID and OAUTH_CLIENT_SECRET in the backend .env as described in the README.');
+                    }
                     // Check for error in URL
                     const params = new URLSearchParams(window.location.search);
                     const error = params.get('error');
@@ -1748,6 +1821,37 @@
             if (monitoredEl) monitoredEl.textContent = Array.isArray(s.monitoredTickets) ? s.monitoredTickets.length : 0;
         }
 
+        function updateConfigBanners(status, auth) {
+            const a = auth || authStatusSnapshot || {};
+            const oauthBanner = document.getElementById('bannerOAuth');
+            const appBanner = document.getElementById('bannerGitHubApp');
+            const jiraBanner = document.getElementById('bannerJira');
+
+            if (oauthBanner) {
+                if (a.hasOAuth === false) {
+                    oauthBanner.style.display = 'flex';
+                } else {
+                    oauthBanner.style.display = 'none';
+                }
+            }
+
+            if (appBanner) {
+                if (a.authenticated && a.hasGitHubApp === false) {
+                    appBanner.style.display = 'flex';
+                } else {
+                    appBanner.style.display = 'none';
+                }
+            }
+
+            if (jiraBanner) {
+                if (jiraConfigError) {
+                    jiraBanner.style.display = 'flex';
+                } else {
+                    jiraBanner.style.display = 'none';
+                }
+            }
+        }
+
         // --- Onboarding / First-Time Setup ---
         function getStoredJiraProject() {
             try {
@@ -1773,12 +1877,21 @@
             if (onboardingProjects.length > 0) return;
             try {
                 const res = await fetch('/api/projects');
+                if (!res.ok) {
+                    jiraConfigError = true;
+                    updateConfigBanners(null, authStatusSnapshot);
+                    return;
+                }
                 const data = await res.json();
                 if (Array.isArray(data.projects)) {
                     onboardingProjects = data.projects;
+                    jiraConfigError = false;
                 }
             } catch (e) {
                 console.error('Failed to load Jira projects for setup:', e);
+                jiraConfigError = true;
+            } finally {
+                updateConfigBanners(null, authStatusSnapshot);
             }
         }
 
@@ -1902,7 +2015,9 @@
         }
 
         // Check auth on page load
-        document.addEventListener('DOMContentLoaded', checkAuthStatus);
+        document.addEventListener('DOMContentLoaded', () => {
+            checkAuthStatus();
+        });
 
         // --- Web Audio API for SFX ---
         const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -2285,17 +2400,17 @@
             }
         }
 
-        async function fetchStatus() {
+        function handleStatusUpdate(data) {
             try {
-                const res = await fetch('/api/status');
-                const data = await res.json();
 
                 // Check Copilot Status
                 const copilotBanner = document.getElementById('copilotWarning');
-                if (data.activeUser && data.activeUser.copilot_enabled === false) {
-                    copilotBanner.style.display = 'flex';
-                } else {
-                    copilotBanner.style.display = 'none';
+                if (copilotBanner) {
+                    if (data.activeUser && data.activeUser.copilot_enabled === false) {
+                        copilotBanner.style.display = 'flex';
+                    } else {
+                        copilotBanner.style.display = 'none';
+                    }
                 }
 
                 // Sync Pause State
@@ -2395,10 +2510,10 @@
 
                     // Logs: when actively processing a ticket, prefer per-ticket logs
                     if (Array.isArray(data.currentTicketLogs) && data.currentTicketLogs.length > 0) {
-                        logTerm.innerHTML = data.currentTicketLogs.map(l => `<div class="log-entry">${l}</div>`).join('');
+                        logTerm.innerHTML = data.currentTicketLogs.map(renderLogLine).join('');
                     } else if (Array.isArray(data.systemLogs) && data.systemLogs.length > 0) {
                         const tail = data.systemLogs.slice(-40);
-                        logTerm.innerHTML = tail.map(l => `<div class="log-entry">${l}</div>`).join('');
+                        logTerm.innerHTML = tail.map(renderLogLine).join('');
                     }
                     logTerm.scrollTop = logTerm.scrollHeight;
 
@@ -2413,10 +2528,10 @@
                     // When idle or scanning, show the global system log stream if available
                     if (Array.isArray(data.systemLogs) && data.systemLogs.length > 0) {
                         const tail = data.systemLogs.slice(-40);
-                        logTerm.innerHTML = tail.map(l => `<div class="log-entry">${l}</div>`).join('');
+                        logTerm.innerHTML = tail.map(renderLogLine).join('');
                         logTerm.scrollTop = logTerm.scrollHeight;
                     } else if (data.currentPhase === 'Scanning') {
-                        logTerm.innerHTML = `<div class="log-entry">> Scanning Jira for new tickets...</div>`;
+                        logTerm.innerHTML = renderLogLine('> Scanning Jira for new tickets...');
                     }
                 }
 
@@ -2466,9 +2581,10 @@
                 document.getElementById('count-cd').innerText = cdItems.length;
                 cdCol.innerHTML = cdItems.length ? cdItems.slice(0, 5).map(t => createCard(t, 'done')).join('') : '<div class="empty-state">Nothing ready</div>';
 
-                // 4. Update sidebar and setup checklist with latest status/auth info
+                // 4. Update sidebar, setup checklist, and configuration banners with latest status/auth info
                 renderSidebar(data, authStatusSnapshot);
                 updateOnboardingPanel(data, authStatusSnapshot);
+                updateConfigBanners(data, authStatusSnapshot);
 
             } catch (e) {
                 // On error (or offline), keep skeleton or show error but don't crash
@@ -2476,10 +2592,75 @@
             }
         }
 
-        setInterval(fetchStatus, 1000);
-        fetchStatus();
+        function classifyLog(line) {
+            const lower = (line || '').toLowerCase();
+            if (lower.includes('error') || lower.includes('failed') || lower.includes('exception')) return 'error';
+            if (lower.includes('warn')) return 'warn';
+            return 'info';
+        }
 
-        // --- Independent Inspections Fetcher (runs on its own timer, never blocks fetchStatus) ---
+        function renderLogLine(line) {
+            const severity = classifyLog(line);
+            let icon = '➤';
+            if (severity === 'error') icon = '⛔';
+            else if (severity === 'warn') icon = '⚠️';
+
+            const cls = severity === 'info' ? 'log-entry' : `log-entry ${severity}`;
+            return `<div class="${cls}"><span class="log-icon">${icon}</span><span>${line}</span></div>`;
+        }
+
+        async function fetchStatusOnce() {
+            try {
+                const res = await fetch('/api/status');
+                const data = await res.json();
+                handleStatusUpdate(data);
+            } catch (e) {
+                console.error('Failed to fetch status:', e);
+            }
+        }
+
+        function startStatusUpdates() {
+            if (window.EventSource) {
+                try {
+                    statusEventSource = new EventSource('/api/status/stream');
+
+                    statusEventSource.onmessage = (event) => {
+                        try {
+                            const data = JSON.parse(event.data);
+                            handleStatusUpdate(data);
+                        } catch (e) {
+                            console.error('Invalid status event payload:', e);
+                        }
+                    };
+
+                    statusEventSource.onerror = (err) => {
+                        console.error('Status stream error, falling back to polling:', err);
+                        try {
+                            statusEventSource.close();
+                        } catch (_) { }
+                        if (!statusPollInterval) {
+                            fetchStatusOnce();
+                            statusPollInterval = setInterval(fetchStatusOnce, 2000);
+                        }
+                    };
+                } catch (e) {
+                    console.error('Failed to start status stream, falling back to polling:', e);
+                    if (!statusPollInterval) {
+                        fetchStatusOnce();
+                        statusPollInterval = setInterval(fetchStatusOnce, 2000);
+                    }
+                }
+            } else {
+                // Older browsers: simple fetch polling
+                fetchStatusOnce();
+                statusPollInterval = setInterval(fetchStatusOnce, 2000);
+            }
+        }
+
+        // Kick off real-time status updates once everything is loaded
+        startStatusUpdates();
+
+        // --- Independent Inspections Fetcher (runs on its own timer, never blocks status updates) ---
         async function fetchInspections() {
             try {
                 const inspectRes = await fetch('/api/inspections');

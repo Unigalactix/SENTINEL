@@ -486,7 +486,7 @@ app.post('/api/copilot/suggest', async (req, res) => {
 });
 
 // --- API for UI ---
-app.get('/api/status', (req, res) => {
+function buildStatusPayload(req) {
     // Get the current user's agent if logged in
     const userId = req.session?.user?.id;
     const myAgent = userId ? getAgent(userId) : null;
@@ -510,7 +510,7 @@ app.get('/api/status', (req, res) => {
         });
     }
 
-    res.json({
+    return {
         ...systemStatus,
         // Multi-tenant fields
         myAgent: myAgent ? {
@@ -522,6 +522,42 @@ app.get('/api/status', (req, res) => {
         } : null,
         allAgents: allAgents,
         activeAgentsCount: activeAgents.size
+    };
+}
+
+// JSON status endpoint (used by tools and as SSE fallback)
+app.get('/api/status', (req, res) => {
+    const payload = buildStatusPayload(req);
+    res.json(payload);
+});
+
+// Server-Sent Events stream for real-time dashboard updates
+app.get('/api/status/stream', (req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+
+    if (res.flushHeaders) {
+        res.flushHeaders();
+    }
+
+    const sendStatus = () => {
+        try {
+            const payload = buildStatusPayload(req);
+            res.write(`data: ${JSON.stringify(payload)}\n\n`);
+        } catch (e) {
+            console.error('[SSE] Failed to send status update:', e.message);
+        }
+    };
+
+    // Send initial snapshot immediately
+    sendStatus();
+
+    // Then stream updates on an interval
+    const intervalId = setInterval(sendStatus, 1000);
+
+    req.on('close', () => {
+        clearInterval(intervalId);
     });
 });
 
