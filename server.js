@@ -83,8 +83,10 @@ let systemStatus = {
     paused: false,             // Pause state
     systemLogs: [],            // Global system log stream for UI terminal
     // Per-user auth state (DEPRECATED - use activeAgents instead)
-    activeUserToken: null,     // OAuth token from logged-in user
-    activeUser: null           // User info from logged-in user
+    activeUserToken: null,           // OAuth access token from logged-in user
+    activeUserRefreshToken: null,    // OAuth refresh token (if issued)
+    activeUserTokenExpiresAt: null,  // Expiry timestamp (ms since epoch) for access token
+    activeUser: null                 // User info from logged-in user
 };
 
 // --- MULTI-TENANT AGENT SYSTEM ---
@@ -214,6 +216,91 @@ app.use(session({
         maxAge: 24 * 60 * 60 * 1000 // 24 hours
     }
 }));
+
+// --- OAuth Token Refresh Helpers ---
+/**
+ * Ensure the current session's access token is fresh.
+ * Returns the (possibly refreshed) access token string.
+ */
+async function getFreshSessionAccessToken(req) {
+    if (!req.session) return null;
+
+    const currentToken = req.session.accessToken;
+    const refreshToken = req.session.refreshToken;
+    const expiresAt = req.session.accessTokenExpiresAt;
+
+    if (!currentToken) return null;
+
+    // If we don't have expiry metadata or a refresh token, just return what we have
+    if (!expiresAt || !refreshToken) {
+        return currentToken;
+    }
+
+    const now = Date.now();
+    // Refresh if token is expired or about to expire within 60 seconds
+    if (now < expiresAt - 60000) {
+        return currentToken;
+    }
+
+    try {
+        const refreshed = await authService.refreshAccessToken(refreshToken);
+        const newExpiresAt = refreshed.expiresIn
+            ? Date.now() + (refreshed.expiresIn * 1000)
+            : null;
+
+        req.session.accessToken = refreshed.accessToken;
+        req.session.refreshToken = refreshed.refreshToken || refreshToken;
+        req.session.accessTokenExpiresAt = newExpiresAt;
+
+        // Also update global status if this user is the active user
+        if (systemStatus.activeUser && req.session.user && systemStatus.activeUser.id === req.session.user.id) {
+            systemStatus.activeUserToken = refreshed.accessToken;
+            systemStatus.activeUserRefreshToken = refreshed.refreshToken || refreshToken;
+            systemStatus.activeUserTokenExpiresAt = newExpiresAt;
+            setActiveToken(refreshed.accessToken);
+        }
+
+        console.log('[Auth] Access token refreshed successfully for current session');
+        return refreshed.accessToken;
+    } catch (e) {
+        console.error('[Auth] Failed to refresh access token:', e.message);
+        return currentToken;
+    }
+}
+
+/**
+ * Ensure the global activeUserToken used by background workers is fresh.
+ * Safe no-op if no refresh token/expiry is available.
+ */
+async function ensureGlobalAccessTokenFresh() {
+    const currentToken = systemStatus.activeUserToken;
+    const refreshToken = systemStatus.activeUserRefreshToken;
+    const expiresAt = systemStatus.activeUserTokenExpiresAt;
+
+    if (!currentToken || !refreshToken || !expiresAt) return;
+
+    const now = Date.now();
+    if (now < expiresAt - 60000) {
+        return; // still valid
+    }
+
+    try {
+        const refreshed = await authService.refreshAccessToken(refreshToken);
+        const newExpiresAt = refreshed.expiresIn
+            ? Date.now() + (refreshed.expiresIn * 1000)
+            : null;
+
+        systemStatus.activeUserToken = refreshed.accessToken;
+        systemStatus.activeUserRefreshToken = refreshed.refreshToken || refreshToken;
+        systemStatus.activeUserTokenExpiresAt = newExpiresAt;
+        setActiveToken(refreshed.accessToken);
+
+        console.log('[Auth] Global access token refreshed successfully');
+    } catch (e) {
+        console.error('[Auth] Failed to refresh global access token:', e.message);
+    }
+}
+
 app.use(express.static('public')); // Serve UI
 
 // --- Authentication Endpoints ---
@@ -271,6 +358,11 @@ app.get('/api/auth/callback', async (req, res) => {
         const tokenData = await authService.exchangeCodeForToken(code, redirectUri);
         const user = await authService.getGitHubUser(tokenData.accessToken);
 
+        // Compute expiry timestamp if GitHub provided expiresIn
+        const accessTokenExpiresAt = tokenData.expiresIn
+            ? Date.now() + (tokenData.expiresIn * 1000)
+            : null;
+
         // Store in session
         req.session.user = {
             id: user.id,
@@ -279,11 +371,15 @@ app.get('/api/auth/callback', async (req, res) => {
             avatar_url: user.avatar_url
         };
         req.session.accessToken = tokenData.accessToken;
+        req.session.refreshToken = tokenData.refreshToken || null;
+        req.session.accessTokenExpiresAt = accessTokenExpiresAt;
         req.session.authMethod = 'oauth';
 
         // Store active user token for background processing (ticket processing, PR creation)
         // DEPRECATED: These global fields maintained for backward compatibility
         systemStatus.activeUserToken = tokenData.accessToken;
+        systemStatus.activeUserRefreshToken = tokenData.refreshToken || null;
+        systemStatus.activeUserTokenExpiresAt = accessTokenExpiresAt;
         systemStatus.activeUser = {
             id: user.id,
             login: user.login,
@@ -374,8 +470,8 @@ app.post('/api/copilot/suggest', async (req, res) => {
     // gh copilot suggest does not support --message/--filename; call plain suggest
     const args = ['copilot', 'suggest'];
 
-    // [NEW] Use user's token for Copilot access
-    const userToken = req.session?.accessToken || systemStatus.activeUserToken;
+    // [NEW] Use user's token for Copilot access, refreshing if needed
+    const userToken = await getFreshSessionAccessToken(req) || systemStatus.activeUserToken;
     const env = { ...process.env };
     if (userToken) {
         env.GITHUB_TOKEN = userToken;
@@ -619,8 +715,8 @@ function logProgress(message) {
 // --- API for Repos (Per-User) ---
 app.get('/api/repos', async (req, res) => {
     try {
-        // Use user's OAuth token if logged in, otherwise fallback to app auth
-        const userToken = req.session?.accessToken;
+        // Use user's OAuth token if logged in (refreshing if needed), otherwise fallback to app auth
+        const userToken = await getFreshSessionAccessToken(req);
         const octokit = getOctokit(userToken);
 
         // Fetch repos accessible to the authenticated user
@@ -1253,6 +1349,8 @@ async function startPolling() {
 
     const poll = async () => {
         try {
+            // Ensure global OAuth token used by background workers is still valid
+            await ensureGlobalAccessTokenFresh();
             if (systemStatus.paused) {
                 // If paused, just update next scan time to keep UI alive but don't scan
                 // [FIX] Don't overwrite status if we are manually inspecting
@@ -1335,6 +1433,8 @@ async function startPolling() {
 
     const monitorChecks = async () => {
         try {
+            // Keep background GitHub token fresh for status checks as well
+            await ensureGlobalAccessTokenFresh();
             if (systemStatus.monitoredTickets.length > 0) {
                 // console.log('Checking CI status for monitored tickets...');
                 for (const ticket of systemStatus.monitoredTickets) {

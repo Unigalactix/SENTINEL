@@ -134,6 +134,85 @@
             gap: 0.35rem;
         }
 
+        /* --- Setup Checklist Panel --- */
+        .setup-panel {
+            padding: 1rem 1.25rem;
+            margin-bottom: 1rem;
+            display: none;
+        }
+
+        .setup-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.75rem;
+        }
+
+        .setup-title {
+            font-size: 0.95rem;
+            font-weight: 600;
+        }
+
+        .setup-progress {
+            font-size: 0.75rem;
+            color: var(--text-dim);
+        }
+
+        .setup-steps {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+            font-size: 0.85rem;
+        }
+
+        .setup-step {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .setup-step-main {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .setup-step-label {
+            font-weight: 500;
+        }
+
+        .setup-step-desc {
+            font-size: 0.75rem;
+            color: var(--text-dim);
+        }
+
+        .setup-status-pill {
+            padding: 2px 10px;
+            border-radius: 999px;
+            font-size: 0.75rem;
+            border: 1px solid var(--glass-border);
+            white-space: nowrap;
+        }
+
+        .setup-status-done {
+            border-color: var(--success);
+            color: var(--success);
+            background: rgba(16, 185, 129, 0.15);
+        }
+
+        .setup-status-pending {
+            border-color: var(--warning);
+            color: var(--warning);
+            background: rgba(245, 158, 11, 0.12);
+        }
+
+        .setup-status-disabled {
+            border-color: rgba(148, 163, 184, 0.7);
+            color: var(--text-dim);
+            background: rgba(15, 23, 42, 0.9);
+        }
+
         .sidebar-title {
             font-size: 0.85rem;
             text-transform: uppercase;
@@ -1187,6 +1266,17 @@
         </aside>
 
         <div class="container" id="mainContent">
+        
+        <!-- Setup Checklist for First-Time Users -->
+        <div id="setupChecklist" class="glass-panel setup-panel">
+            <div class="setup-header">
+                <div class="setup-title">First-Time Setup</div>
+                <div class="setup-progress" id="setupProgressText">3 steps remaining</div>
+            </div>
+            <div class="setup-steps" id="setupStepsBody">
+                <!-- Populated by JavaScript based on auth and Jira project state -->
+            </div>
+        </div>
         <header>
             <div class="board-title">
                 <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
@@ -1493,6 +1583,10 @@
         let authMethod = null;
         let authStatusSnapshot = null;
 
+        // --- Onboarding State ---
+        let onboardingProjects = [];
+        let selectedJiraProject = null;
+
         // --- Polling / Timer State ---
         const UI_POLL_INTERVAL_SECONDS = 30; // mirror server POLL_INTERVAL_MS
         let nextScanEta = null; // client-side estimate of next scan time
@@ -1510,6 +1604,10 @@
                     showMainContent();
                     updateUserDisplay();
                     renderSidebar(null, authStatusSnapshot);
+
+                    // Load setup checklist data once user is authenticated
+                    ensureOnboardingProjectsLoaded();
+                    updateOnboardingPanel(null, authStatusSnapshot);
                 } else {
                     showLoginScreen();
                     // Check for error in URL
@@ -1648,6 +1746,150 @@
             // Throughput
             if (processedEl) processedEl.textContent = s.processedCount != null ? s.processedCount : 0;
             if (monitoredEl) monitoredEl.textContent = Array.isArray(s.monitoredTickets) ? s.monitoredTickets.length : 0;
+        }
+
+        // --- Onboarding / First-Time Setup ---
+        function getStoredJiraProject() {
+            try {
+                return window.localStorage.getItem('sentinel_default_jira_project') || null;
+            } catch (e) {
+                return null;
+            }
+        }
+
+        function setStoredJiraProject(key) {
+            try {
+                if (key) {
+                    window.localStorage.setItem('sentinel_default_jira_project', key);
+                } else {
+                    window.localStorage.removeItem('sentinel_default_jira_project');
+                }
+            } catch (e) {
+                // ignore storage errors
+            }
+        }
+
+        async function ensureOnboardingProjectsLoaded() {
+            if (onboardingProjects.length > 0) return;
+            try {
+                const res = await fetch('/api/projects');
+                const data = await res.json();
+                if (Array.isArray(data.projects)) {
+                    onboardingProjects = data.projects;
+                }
+            } catch (e) {
+                console.error('Failed to load Jira projects for setup:', e);
+            }
+        }
+
+        function updateOnboardingPanel(status, auth) {
+            const panel = document.getElementById('setupChecklist');
+            if (!panel) return;
+
+            const a = auth || authStatusSnapshot || {};
+            const isAuthed = !!a.authenticated;
+            const hasOAuthConfigured = !!a.hasOAuth;
+            const hasGitHubAppConfigured = !!a.hasGitHubApp;
+
+            // Treat "App installed for this user" as: authenticated + app configured
+            const appReadyForUser = isAuthed && hasGitHubAppConfigured;
+
+            selectedJiraProject = getStoredJiraProject();
+
+            const steps = [];
+
+            // Step 1: Login with GitHub
+            const step1Done = isAuthed && hasOAuthConfigured;
+            steps.push({
+                id: 'login',
+                label: 'Connect GitHub (OAuth)',
+                desc: step1Done ? 'You are signed in with GitHub.' : 'Sign in to let Sentinel act on your behalf.',
+                done: step1Done,
+                actionHtml: step1Done ? '' : '<a href="/api/auth/login" class="setup-status-pill setup-status-pending">Login</a>'
+            });
+
+            // Step 2: Install GitHub App
+            const step2Done = appReadyForUser;
+            steps.push({
+                id: 'app',
+                label: 'Install Sentinel GitHub App',
+                desc: step2Done ? 'GitHub App is configured for this account/org.' : 'Install the GitHub App to allow branch, PR, and workflow automation.',
+                done: step2Done,
+                actionHtml: step2Done ? '' : '<a href="/api/auth/install" class="setup-status-pill setup-status-pending">Open App</a>'
+            });
+
+            // Step 3: Choose Jira project (client-side preference)
+            const hasProjects = Array.isArray(onboardingProjects) && onboardingProjects.length > 0;
+            const step3Done = !!selectedJiraProject;
+
+            let projectSelectorHtml = '';
+            if (hasProjects) {
+                const options = onboardingProjects.map(key => {
+                    const sel = key === selectedJiraProject ? 'selected' : '';
+                    return `<option value="${key}" ${sel}>${key}</option>`;
+                }).join('');
+                projectSelectorHtml = `
+                    <select id="setupJiraProjectSelect" class="secret-input" style="min-width:120px; background:#1f2937; color:white;" onchange="onSelectJiraProject()">
+                        <option value="" ${selectedJiraProject ? '' : 'selected'} disabled>Select project</option>
+                        ${options}
+                    </select>`;
+            } else {
+                projectSelectorHtml = '<span class="setup-status-pill setup-status-disabled">Loading projects...</span>';
+            }
+
+            steps.push({
+                id: 'jira',
+                label: 'Select primary Jira project',
+                desc: step3Done && selectedJiraProject ? `Using project ${selectedJiraProject} for new tickets and filters.` : 'Pick the main Jira project Sentinel should focus on.',
+                done: step3Done,
+                actionHtml: projectSelectorHtml
+            });
+
+            const incompleteCount = steps.filter(s => !s.done).length;
+
+            // If everything is complete, hide the panel
+            if (incompleteCount === 0) {
+                panel.style.display = 'none';
+                return;
+            }
+
+            const progressText = document.getElementById('setupProgressText');
+            if (progressText) {
+                progressText.textContent = `${incompleteCount} step${incompleteCount > 1 ? 's' : ''} remaining`;
+            }
+
+            const body = document.getElementById('setupStepsBody');
+            if (body) {
+                body.innerHTML = steps.map(step => {
+                    const statusClass = step.done ? 'setup-status-done' : 'setup-status-pending';
+                    const statusLabel = step.done ? 'Done' : 'Pending';
+                    const statusHtml = step.actionHtml && !step.done
+                        ? step.actionHtml
+                        : `<span class="setup-status-pill ${statusClass}">${statusLabel}</span>`;
+
+                    return `
+                        <div class="setup-step" data-step="${step.id}">
+                            <div class="setup-step-main">
+                                <div class="setup-step-label">${step.label}</div>
+                                <div class="setup-step-desc">${step.desc}</div>
+                            </div>
+                            <div>
+                                ${statusHtml}
+                            </div>
+                        </div>`;
+                }).join('');
+            }
+
+            panel.style.display = 'block';
+        }
+
+        function onSelectJiraProject() {
+            const sel = document.getElementById('setupJiraProjectSelect');
+            if (!sel) return;
+            const value = sel.value || null;
+            selectedJiraProject = value;
+            setStoredJiraProject(value);
+            updateOnboardingPanel(null, authStatusSnapshot);
         }
 
         async function logout() {
@@ -2224,8 +2466,9 @@
                 document.getElementById('count-cd').innerText = cdItems.length;
                 cdCol.innerHTML = cdItems.length ? cdItems.slice(0, 5).map(t => createCard(t, 'done')).join('') : '<div class="empty-state">Nothing ready</div>';
 
-                // 4. Update sidebar with latest status/auth info
+                // 4. Update sidebar and setup checklist with latest status/auth info
                 renderSidebar(data, authStatusSnapshot);
+                updateOnboardingPanel(data, authStatusSnapshot);
 
             } catch (e) {
                 // On error (or offline), keep skeleton or show error but don't crash

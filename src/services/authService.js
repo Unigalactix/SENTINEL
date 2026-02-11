@@ -21,7 +21,9 @@ function getAuthorizationUrl(redirectUri) {
     const params = new URLSearchParams({
         client_id: OAUTH_CLIENT_ID,
         redirect_uri: redirectUri,
-        scope: 'repo read:org read:user',
+        // Request offline access so GitHub can issue expiring tokens with refresh tokens
+        // (GitHub may ignore this for some app types, but it's safe to include.)
+        scope: 'repo read:org read:user offline_access',
         state: generateState()
     });
     return `https://github.com/login/oauth/authorize?${params.toString()}`;
@@ -59,7 +61,8 @@ async function exchangeCodeForToken(code, redirectUri) {
             client_id: OAUTH_CLIENT_ID,
             client_secret: OAUTH_CLIENT_SECRET,
             code: code,
-            redirect_uri: redirectUri
+            redirect_uri: redirectUri,
+            grant_type: 'authorization_code'
         })
     });
 
@@ -72,7 +75,50 @@ async function exchangeCodeForToken(code, redirectUri) {
     return {
         accessToken: data.access_token,
         tokenType: data.token_type,
-        scope: data.scope
+        scope: data.scope,
+        // These fields are present only when GitHub issues expiring tokens
+        refreshToken: data.refresh_token,
+        expiresIn: data.expires_in,
+        refreshTokenExpiresIn: data.refresh_token_expires_in
+    };
+}
+
+/**
+ * Uses a refresh token to obtain a new access token.
+ * This is only effective when GitHub has issued expiring tokens with refresh tokens.
+ */
+async function refreshAccessToken(refreshToken) {
+    if (!refreshToken) {
+        throw new Error('No refresh token available');
+    }
+
+    const response = await fetch('https://github.com/login/oauth/access_token', {
+        method: 'POST',
+        headers: {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            client_id: OAUTH_CLIENT_ID,
+            client_secret: OAUTH_CLIENT_SECRET,
+            grant_type: 'refresh_token',
+            refresh_token: refreshToken
+        })
+    });
+
+    const data = await response.json();
+
+    if (data.error) {
+        throw new Error(`OAuth refresh error: ${data.error_description || data.error}`);
+    }
+
+    return {
+        accessToken: data.access_token,
+        tokenType: data.token_type,
+        scope: data.scope,
+        refreshToken: data.refresh_token || refreshToken,
+        expiresIn: data.expires_in,
+        refreshTokenExpiresIn: data.refresh_token_expires_in
     };
 }
 
@@ -128,5 +174,6 @@ module.exports = {
     getGitHubUser,
     hasGitHubAppCredentials,
     hasOAuthCredentials,
-    getAuthConfig
+    getAuthConfig,
+    refreshAccessToken
 };
