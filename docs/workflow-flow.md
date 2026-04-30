@@ -1,6 +1,6 @@
-# CI/CD Automation Flow (Visio-style)
+# CI/CD Automation Flow
 
-Below is a high-level flow diagram (Mermaid) showing how the system moves from GitHub Issues → Pull Requests → GitHub Actions → Azure → issue updates, including monitoring and reconciliation on server restarts.
+Below is a high-level flow diagram (Mermaid) showing how the system moves from GitHub Issues → Pull Requests → GitHub Actions → Azure → issue updates, including monitoring and reconciliation on server restarts. Scans are **manual-only** — triggered via the dashboard **Scan Now** button or `POST /api/poll`.
 
 ```mermaid
 flowchart TD
@@ -17,7 +17,7 @@ flowchart TD
   subgraph SERVER[Automation Server]
     S0[Startup]
     SA[Check activeAgents for Token]
-    S1[Poll GitHub Issues (sentinel:todo)]
+    S1[Scan GitHub Issues (sentinel:todo) — Manual Trigger]
     S2[Process Issue Data]
     S3[Analyze Repo & Detect Language]
     S3A[Agentic AI: Plan Fix & List Secrets]
@@ -55,7 +55,7 @@ flowchart TD
   end
 
   %% Main happy path
-  J1 -->|Sentinel poll| SA -->|Agent token found| S1 --> S2 --> S3 --> S3A --> S4 --> S5 --> S6 --> S7 --> G1
+  J1 -->|Scan Now / POST /api/poll| SA -->|Agent token found| S1 --> S2 --> S3 --> S3A --> S4 --> S5 --> S6 --> S7 --> G1
   SA -->|No agents| SA
   S2 -->|Label: in-progress| J2
   S7 -->|Comment PR| S8 --> G2
@@ -74,12 +74,14 @@ flowchart TD
 ```
 
 Key Notes
-- **Multi-Tenant Auth**: Poll loop checks `activeAgents` Map via `getFirstAgent()` before scanning GitHub Issues. If no agent token is available, it waits for a user login.
+- **Manual Trigger**: Scans are initiated by the user via the **Scan Now** button or `POST /api/poll`. The system idles in "Ready" state until triggered.
+- **Multi-Tenant Auth**: Scan checks `activeAgents` Map via `getFirstAgent()` before scanning GitHub Issues. If no agent token is available, it waits for a user login.
+- **Concurrency Guard**: If a scan is already in progress, repeated calls to `POST /api/poll` return the current phase without spawning a second scan.
 - **Stale Agent Cleanup**: `cleanupStaleAgents()` runs every 15 minutes, removing agents inactive > 1 hour.
 - Build/Test defaults when missing: `npm run build` / `npm test`.
 - Static-site deploys package only `public/` or a minimal `deploy/` folder; validates `index.html`.
 - Deployment URL published via GitHub Deployments and included in issue comments.
-- On restart, the server reconciles open org PRs → seeds monitoring for issues in active statuses.
+- On restart, the server reconciles open org PRs → seeds monitoring for issues referenced as `GH-NNN` in PR title/body/branch.
 
 How to View
 - GitHub renders Mermaid diagrams natively in Markdown.
