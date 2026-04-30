@@ -1679,7 +1679,8 @@
             const navRight = document.getElementById('navRight');
             if (currentUser && authMethod === 'oauth' && navRight && !document.getElementById('userInfo')) {
                 const login = (currentUser.login || currentUser.name || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-                const avatar = currentUser.avatar_url ? `<img src="${currentUser.avatar_url}" class="user-avatar" alt="">` : '';
+                const avatarUrl = escapeHtml(currentUser.avatar_url || '');
+                const avatar = avatarUrl ? `<img src="${avatarUrl}" class="user-avatar" alt="">` : '';
                 const userHtml = `
                     <div class="user-info" id="userInfo">
                         ${avatar}
@@ -2402,7 +2403,7 @@
                         logTerm.innerHTML = tail.map(l => `<div class="log-entry">${escapeHtml(l)}</div>`).join('');
                         logTerm.scrollTop = logTerm.scrollHeight;
                     } else if (data.currentPhase === 'Scanning') {
-                        logTerm.innerHTML = `<div class="log-entry">&gt; Scanning GitHub for new issues...</div>`;
+                    logTerm.innerHTML = `<div class="log-entry">${escapeHtml('> Scanning GitHub for new issues...')}</div>`;
                     }
                 }
 
