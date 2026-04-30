@@ -2429,22 +2429,30 @@
                 if (!insList) return;
 
                 if (inspectData.tickets && inspectData.tickets.length > 0) {
-                    const issuesRepo = process.env?.GITHUB_ISSUES_REPO || '';
+                    // Fetch GitHub Issues repo from the server-side config endpoint
+                    let issuesRepoPath = '';
+                    try {
+                        const cfgRes = await fetch('/api/issues-source');
+                        if (cfgRes.ok) {
+                            const cfg = await cfgRes.json();
+                            if (cfg.repo) issuesRepoPath = cfg.repo;
+                        }
+                    } catch (e) { /* use fallback */ }
+
                     insList.innerHTML = inspectData.tickets.map(t => {
                         // Build GitHub issue URL from key (GH-123)
                         const issueNumber = t.key ? t.key.replace(/^GH-/i, '') : '';
-                        let issueBaseUrl = '';
-                        try {
-                            // Try to get repo from issue fields or fallback to a relative path
-                            const repo = t.fields?.repo || '';
-                            issueBaseUrl = repo ? `https://github.com/${repo}/issues/${issueNumber}` : `https://github.com/issues/${issueNumber}`;
-                        } catch (e) { /* ignore */ }
+                        const issueBaseUrl = issuesRepoPath && issueNumber
+                            ? `https://github.com/${issuesRepoPath}/issues/${issueNumber}`
+                            : '#';
+                        const createdDate = t.fields?.created ? new Date(t.fields.created).toLocaleDateString() : '';
 
                         return `
                         <a href="${issueBaseUrl}" target="_blank" class="ins-item" style="text-decoration:none; display:flex; gap:10px; padding:8px 12px; border-bottom:1px solid rgba(255,255,255,0.05); align-items:center; transition:background 0.2s;">
                             <span style="font-family:'JetBrains Mono'; font-size:0.8rem; color:var(--primary); min-width:60px;">${t.key}</span>
                             <span style="font-size:0.85rem; color:var(--text-main); flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${t.fields.summary || 'Untitled'}</span>
-                            <span style="font-size:0.7rem; padding:2px 8px; border-radius:4px; background:rgba(255,255,255,0.05); color:var(--text-dim);">${t.fields.priority ? t.fields.priority.name : ''}</span>
+                            <span style="font-size:0.7rem; padding:2px 8px; border-radius:4px; background:rgba(255,255,255,0.05); color:var(--text-dim);">${t.fields.priority ? t.fields.priority.name : (t.fields.status ? t.fields.status.name : '')}</span>
+                            <span style="font-size:0.7rem; color:var(--text-dim);">${createdDate}</span>
                         </a>
                     `}).join('');
                 } else {

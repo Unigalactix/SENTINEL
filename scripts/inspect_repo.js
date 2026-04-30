@@ -255,39 +255,44 @@ async function processRepo(repoName, autoFix = false, logger = console.log) {
 
             // Search for an existing open GitHub issue with the same summary
             const existingIssues = await searchIssues(ticketSummary);
+            // Fix regex to use word-boundary to avoid false positives like "Postponed"
             const existingOpen = existingIssues.filter(i => {
                 const status = i.fields?.status?.name || '';
-                return !/done|closed|resolved/i.test(status);
+                return !/^(done|closed|resolved)$/i.test(status);
             });
 
             let issueKey, issueUrl;
 
-            if (existingOpen.length > 0) {
-                issueKey = existingOpen[0].key;
-                log(`       🔄 Found open issue ${issueKey}. Updating...`);
+            try {
+                if (existingOpen.length > 0) {
+                    issueKey = existingOpen[0].key;
+                    log(`       🔄 Found open issue ${issueKey}. Updating...`);
 
-                // Update description with latest findings
-                await updateIssue(issueKey, {
-                    description: fullDescription
-                });
+                    // Update description with latest findings
+                    await updateIssue(issueKey, {
+                        description: fullDescription
+                    });
 
-                // Add a comment to notify
-                await addComment(issueKey, `🔄 Automated Scan Updated\nScan found ${findings.length} issues. Issue description updated.`);
-                log(`       ✅ Updated ${issueKey}`);
-            } else {
-                // Create a new GitHub issue
-                const issueResult = await createIssue(ISSUES_REPO, ticketSummary, fullDescription, { priorityName: 'High' });
-                issueKey = issueResult.key;
-                log(`       ✅ Created GitHub Issue ${issueKey}`);
+                    // Add a comment to notify
+                    await addComment(issueKey, `🔄 Automated Scan Updated\nScan found ${findings.length} issues. Issue description updated.`);
+                    log(`       ✅ Updated ${issueKey}`);
+                } else {
+                    // Create a new GitHub issue
+                    const issueResult = await createIssue(ISSUES_REPO, ticketSummary, fullDescription, { priorityName: 'High' });
+                    issueKey = issueResult.key;
+                    log(`       ✅ Created GitHub Issue ${issueKey}`);
+                }
+
+                if (ISSUES_REPO && issueKey) {
+                    issueUrl = `https://github.com/${ISSUES_REPO}/issues/${issueKey.replace(/^GH-/i, '')}`;
+                }
+                return { issueKey, issueUrl };
+            } catch (innerErr) {
+                error(`       ❌ Issue creation/update failed: ${innerErr.message}`);
+                return null;
             }
-
-            if (ISSUES_REPO && issueKey) {
-                issueUrl = `https://github.com/${ISSUES_REPO}/issues/${issueKey.replace(/^GH-/i, '')}`;
-            }
-            return { issueKey, issueUrl };
-
         } catch (err) {
-            error(`       ❌ Issue creation/update failed: ${err.message}`);
+            error(`       ❌ Issue lookup failed: ${err.message}`);
         }
     }
 }

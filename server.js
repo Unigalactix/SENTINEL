@@ -1314,7 +1314,9 @@ async function startPolling() {
                         priority,
                         result: 'Resumed',
                         time: new Date().toLocaleTimeString(),
-                        issueUrl: `https://github.com/${process.env.GITHUB_ISSUES_REPO}/issues/${issueKey.replace(/^GH-/i, '')}`,
+                        issueUrl: process.env.GITHUB_ISSUES_REPO
+                            ? `https://github.com/${process.env.GITHUB_ISSUES_REPO}/issues/${issueKey.replace(/^GH-/i, '')}`
+                            : null,
                         prUrl: pr.prUrl,
                         repoName: pr.repoName,
                         branch: pr.branch,
