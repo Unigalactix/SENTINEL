@@ -32,7 +32,7 @@ const {
     checkCopilotStatus    // [NEW]
 } = require('./src/services/githubService');
 const githubService = require('./src/services/githubService');
-const { getPendingTickets, transitionIssue, addComment, getIssueDetails, getInspectionTickets, createIssue } = require('./src/services/jiraService');
+const { getPendingTickets, transitionIssue, addComment, getIssueDetails, getInspectionTickets, createIssue } = require('./src/services/githubIssueService');
 const llmService = require('./src/services/llmService'); // [NEW]
 require('dotenv').config();
 
@@ -525,21 +525,22 @@ app.get('/api/status', (req, res) => {
     });
 });
 
-// Serve Jira base URL to the frontend for link construction
-app.get('/api/jira-base-url', (req, res) => {
-    const baseUrl = process.env.JIRA_BASE_URL || 'https://unigalactix.atlassian.net';
-    res.json({ baseUrl });
+// Return GitHub Issues source info to the frontend
+app.get('/api/issues-source', (req, res) => {
+    res.json({ source: 'github', repo: process.env.GITHUB_ISSUES_REPO });
 });
 
-// List monitored Jira projects (keys)
+// Deprecated alias for /api/jira-base-url — kept for backwards compat
+app.get('/api/jira-base-url', (req, res) => {
+    res.json({ source: 'github', repo: process.env.GITHUB_ISSUES_REPO });
+});
+
+// List monitored GitHub repositories (from GitHub Issues)
 app.get('/api/projects', async (req, res) => {
     try {
-        const { getAllProjectKeys } = require('./src/services/jiraService');
-        const keysCsv = await getAllProjectKeys();
-        const projects = (keysCsv || '')
-            .split(',')
-            .map(k => k.trim())
-            .filter(Boolean);
+        const { getProjects } = require('./src/services/githubIssueService');
+        const projectList = await getProjects();
+        const projects = projectList.map(p => p.key || p);
         res.json({ projects });
     } catch (e) {
         res.status(500).json({ error: e.message });
@@ -810,7 +811,7 @@ app.post('/api/inspect', async (req, res) => {
     }
 });
 
-// --- API: Create Jira Ticket (KAN project) ---
+// --- API: Create GitHub Issue ---
 app.post('/api/tickets', async (req, res) => {
     try {
         const { block, title, repoName, description, priority } = req.body || {};
@@ -819,7 +820,7 @@ app.post('/api/tickets', async (req, res) => {
             return res.status(400).json({ error: 'title and repoName are required' });
         }
 
-        const projectKey = process.env.JIRA_CREATE_PROJECT_KEY || 'KAN';
+        const targetRepo = process.env.GITHUB_ISSUES_REPO || repoName;
 
         const safeBlock = (block || '').trim();
         const summaryParts = [];
@@ -828,7 +829,7 @@ app.post('/api/tickets', async (req, res) => {
         const summary = summaryParts.join(' ');
 
         const descLines = [];
-        descLines.push(`Repository: ${repoName}`);
+        descLines.push(`**repo:** ${repoName}`);
         if (safeBlock) descLines.push(`Block: ${safeBlock}`);
         descLines.push('');
         if (description && description.trim()) {
@@ -839,22 +840,23 @@ app.post('/api/tickets', async (req, res) => {
 
         const priorityName = (priority || 'Medium').trim();
 
-        const issue = await createIssue(projectKey, summary, fullDescription, 'Task', {
+        const issue = await createIssue(targetRepo, summary, fullDescription, {
             priorityName
         });
 
-        const url = `${process.env.JIRA_BASE_URL}/browse/${issue.key}`;
+        const issueRepo = process.env.GITHUB_ISSUES_REPO || repoName;
+        const url = `https://github.com/${issueRepo}/issues/${issue.id}`;
 
-        logProgress(`Created Jira ticket from UI: ${issue.key} (${projectKey}) for repo ${repoName}`);
+        logProgress(`Created GitHub Issue from UI: ${issue.key} for repo ${repoName}`);
 
         res.json({
             key: issue.key,
             url,
-            projectKey
+            repo: targetRepo
         });
     } catch (e) {
-        console.error('[API] Failed to create Jira ticket from UI:', e.message);
-        res.status(500).json({ error: e.message || 'Failed to create ticket' });
+        console.error('[API] Failed to create GitHub Issue from UI:', e.message);
+        res.status(500).json({ error: e.message || 'Failed to create issue' });
     }
 });
 
@@ -870,7 +872,7 @@ async function processTicketData(issue) {
     systemStatus.currentPhase = 'Processing';
     systemStatus.currentTicketKey = issueKey;
     systemStatus.currentTicketLogs = [];
-    systemStatus.currentJiraUrl = `${process.env.JIRA_BASE_URL}/browse/${issueKey}`;
+    systemStatus.currentJiraUrl = issueKey ? `https://github.com/${process.env.GITHUB_ISSUES_REPO}/issues/${issueKey.replace('GH-', '')}` : null;
     systemStatus.currentPrUrl = null;
     systemStatus.currentPayload = null;
 
@@ -1056,7 +1058,7 @@ async function processTicketData(issue) {
         fixStrategy = await llmService.planFix(ticketData, repoSummary);
         logProgress(`[Agentic] Fix Strategy generated.`);
 
-        // Post Analysis to Jira
+        // Post Analysis to GitHub Issue
         if (issueKey) {
             const analysisComment = `🤖 **AI Agent Analysis**\n\n**Repository**: ${repoName}\n${repoSummary}\n\n**Secrets Found**: ${availableSecrets.length ? availableSecrets.join(', ') : 'None detected'}\n\n**Fix Strategy**:\n${fixStrategy}`;
             await addComment(issueKey, analysisComment);
@@ -1089,7 +1091,7 @@ async function processTicketData(issue) {
 
     try {
         // 1. Move to In Progress
-        logProgress(`Transitioning Jira ticket to "In Progress"...`);
+        logProgress(`Transitioning GitHub Issue to "In Progress"...`);
         if (issueKey) {
             await transitionIssue(issueKey, 'In Progress');
             await addComment(issueKey, `🔄 Moving to In Progress`);
@@ -1102,7 +1104,7 @@ async function processTicketData(issue) {
         // 2.1 Optional: Apply ticket-specific Copilot fixes to target files before PR
         const ticketFiles = Array.isArray(ticketData.customfield_files) ? ticketData.customfield_files : [];
         if (USE_GH_COPILOT && ticketFiles.length > 0) {
-            const fixPrompt = `Address Jira ticket ${issueKey} requirements. Context: Language=${language}, Build=${buildCommand}, Test=${testCommand}. Make minimal, safe changes.`;
+            const fixPrompt = `Address GitHub Issue ${issueKey} requirements. Context: Language=${language}, Build=${buildCommand}, Test=${testCommand}. Make minimal, safe changes.`;
             logProgress(`Applying Copilot fixes to ${ticketFiles.length} file(s)...`);
             await applyCopilotFixes({ files: ticketFiles, prompt: fixPrompt });
         }
@@ -1113,7 +1115,7 @@ async function processTicketData(issue) {
             logProgress(`Running gh copilot suggest for pre-PR generation...`);
             const targetFile = `.github/workflows/${repoName.split('/')[1] || 'repo'}-ci.yml`;
             const promptParts = [
-                `Jira Ticket: ${issueKey}`,
+                `GitHub Issue: ${issueKey}`,
                 `Repo: ${repoName}`,
                 `Default Branch: ${defaultBranch}`,
                 `Language: ${language}`,
@@ -1198,7 +1200,7 @@ async function processTicketData(issue) {
             // 4. Comment Success & Move to configured post-PR status (per-board override)
             if (issueKey) {
                 const postPrStatus = getPostPrStatusForIssue(issue);
-                logProgress(`Posting Success comment to Jira...`);
+                logProgress(`Posting success comment to GitHub Issue...`);
                 await addComment(issueKey, `SUCCESS: Workflow PR created! \nLink: ${result.prUrl} `);
                 await transitionIssue(issueKey, postPrStatus);
                 await addComment(issueKey, `➡️ Moving to ${postPrStatus}`);
@@ -1314,7 +1316,7 @@ async function startPolling() {
                         priority,
                         result: 'Resumed',
                         time: new Date().toLocaleTimeString(),
-                        jiraUrl: `${process.env.JIRA_BASE_URL}/browse/${issueKey}`,
+                        jiraUrl: `https://github.com/${process.env.GITHUB_ISSUES_REPO}/issues/${issueKey.replace('GH-', '')}`,
                         prUrl: pr.prUrl,
                         repoName: pr.repoName,
                         branch: pr.branch,
@@ -1541,11 +1543,11 @@ app.listen(PORT, async () => {
 
     // Verify Env
     const ghToken = process.env.GHUB_TOKEN;
-    const jiraProject = process.env.JIRA_PROJECT_KEY;
+    const issuesRepo = process.env.GITHUB_ISSUES_REPO;
     const copilotEnabled = process.env.USE_GH_COPILOT; // Just log it
 
     writeLog(`GitHub Token present: ${!!ghToken}`);
-    writeLog(`Jira Project: ${jiraProject}`);
+    writeLog(`GitHub Issues Repo: ${issuesRepo}`);
     writeLog(`GH Copilot enabled: ${copilotEnabled}`);
 
     // Allow global trigger

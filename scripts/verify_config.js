@@ -3,9 +3,7 @@ const path = require('path');
 require('dotenv').config();
 
 const requiredEnvVars = [
-    'JIRA_BASE_URL',
-    'JIRA_USER_EMAIL',
-    'JIRA_API_TOKEN',
+    'GITHUB_ISSUES_REPO',
     'OAUTH_CLIENT_ID',
     'OAUTH_CLIENT_SECRET',
     // 'GHUB_TOKEN', // Optional if OAuth is used
@@ -17,6 +15,9 @@ const requiredEnvVars = [
 
 const deprecatedEnvVars = [
     'LLM_DEPLOYEMENT_NAME', // Typo
+    'JIRA_BASE_URL',        // Replaced by GITHUB_ISSUES_REPO
+    'JIRA_USER_EMAIL',      // Replaced by GITHUB_ISSUES_REPO
+    'JIRA_API_TOKEN'        // Replaced by GITHUB_ISSUES_REPO
     // 'GITHUB_APP_ID', // Kept for app auth reference, maybe verify if present
     // 'GITHUB_PRIVATE_KEY'
 ];
@@ -36,7 +37,11 @@ requiredEnvVars.forEach(key => {
 // Check Deprecated Vars
 deprecatedEnvVars.forEach(key => {
     if (process.env[key]) {
-        warnings.push(`Found deprecated environment variable: ${key}. Please use the correct key.`);
+        if (['JIRA_BASE_URL', 'JIRA_USER_EMAIL', 'JIRA_API_TOKEN'].includes(key)) {
+            warnings.push(`Found deprecated Jira environment variable: ${key}. Migrate to GITHUB_ISSUES_REPO / GITHUB_ISSUES_LABEL.`);
+        } else {
+            warnings.push(`Found deprecated environment variable: ${key}. Please use the correct key.`);
+        }
     }
 });
 
@@ -46,7 +51,7 @@ const requiredFiles = [
     'server.js',
     'package.json',
     'src/services/githubService.js',
-    'src/services/jiraService.js',
+    'src/services/githubIssueService.js',
     'src/services/llmService.js'
 ];
 

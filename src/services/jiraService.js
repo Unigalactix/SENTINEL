@@ -1,3 +1,4 @@
+// DEPRECATED: Use githubIssueService.js instead. This file will be removed in a future version.
 const https = require('https');
 require('dotenv').config();
 

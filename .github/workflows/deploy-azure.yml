@@ -44,9 +44,8 @@ jobs:
               {"name": "OAUTH_CLIENT_ID", "value": "${{ secrets.OAUTH_CLIENT_ID }}"},
               {"name": "OAUTH_CLIENT_SECRET", "value": "${{ secrets.OAUTH_CLIENT_SECRET }}"},
               {"name": "SESSION_SECRET", "value": "${{ secrets.SESSION_SECRET }}"},
-              {"name": "JIRA_BASE_URL", "value": "${{ secrets.JIRA_BASE_URL }}"},
-              {"name": "JIRA_USER_EMAIL", "value": "${{ secrets.JIRA_USER_EMAIL }}"},
-              {"name": "JIRA_API_TOKEN", "value": "${{ secrets.JIRA_API_TOKEN }}"},
+              {"name": "GITHUB_ISSUES_REPO", "value": "${{ secrets.GITHUB_ISSUES_REPO }}"},
+              {"name": "GITHUB_ISSUES_LABEL", "value": "${{ secrets.GITHUB_ISSUES_LABEL }}"},
               {"name": "LLM_API_KEY", "value": "${{ secrets.LLM_API_KEY }}"},
               {"name": "LLM_ENDPOINT", "value": "${{ secrets.LLM_ENDPOINT }}"},
               {"name": "WEBSITES_PORT", "value": "3000"}
