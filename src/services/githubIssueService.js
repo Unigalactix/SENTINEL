@@ -127,7 +127,7 @@ function parseIssueNumber(issueKey) {
  */
 async function getPendingTickets() {
     if (!GITHUB_ISSUES_REPO) {
-        console.warn('[GitHub Issue Service] GITHUB_ISSUES_REPO is not set. Returning empty list.');
+        console.warn('[GitHub Issue Service] GITHUB_ISSUES_REPO is not set. Set it to "owner/repo" format (e.g., "Unigalactix/SENTINEL"). Returning empty list.');
         return [];
     }
 
@@ -259,7 +259,7 @@ async function getAllProjectKeys() {
  * Returns the same shape as getPendingTickets() items.
  */
 async function getIssueDetails(issueKey) {
-    if (!GITHUB_ISSUES_REPO) throw new Error('GITHUB_ISSUES_REPO is not set');
+    if (!GITHUB_ISSUES_REPO) throw new Error('GITHUB_ISSUES_REPO environment variable is required. Set it to "owner/repo" format (e.g., "Unigalactix/SENTINEL").');
 
     const issueNumber = parseIssueNumber(issueKey);
 
@@ -329,7 +329,7 @@ async function createIssue(repo, title, body, options = {}) {
  * Update title/body of an existing issue.
  */
 async function updateIssue(issueKey, fields) {
-    if (!GITHUB_ISSUES_REPO) throw new Error('GITHUB_ISSUES_REPO is not set');
+    if (!GITHUB_ISSUES_REPO) throw new Error('GITHUB_ISSUES_REPO environment variable is required. Set it to "owner/repo" format (e.g., "Unigalactix/SENTINEL").');
 
     const issueNumber = parseIssueNumber(issueKey);
 

@@ -76,7 +76,7 @@ let systemStatus = {
     currentPhase: 'Initializing', // 'Scanning', 'Processing', 'Waiting'
     currentTicketKey: null,
     currentTicketLogs: [],     // New: Array of log strings for the active ticket
-    currentJiraUrl: null,      // New: URL to Jira ticket
+    currentIssueUrl: null,      // URL to the current GitHub Issue
     currentPrUrl: null,        // New: URL to created PR
     currentPayload: null,      // New: Generated YAML content
     nextScanTime: Date.now() + 1000,
@@ -872,7 +872,7 @@ async function processTicketData(issue) {
     systemStatus.currentPhase = 'Processing';
     systemStatus.currentTicketKey = issueKey;
     systemStatus.currentTicketLogs = [];
-    systemStatus.currentJiraUrl = issueKey ? `https://github.com/${process.env.GITHUB_ISSUES_REPO}/issues/${issueKey.replace('GH-', '')}` : null;
+    systemStatus.currentIssueUrl = issueKey ? `https://github.com/${process.env.GITHUB_ISSUES_REPO}/issues/${issueKey.replace('GH-', '')}` : null;
     systemStatus.currentPrUrl = null;
     systemStatus.currentPayload = null;
 
@@ -1225,7 +1225,7 @@ async function processTicketData(issue) {
             priority,
             result: 'Success',
             time: new Date().toLocaleTimeString(),
-            jiraUrl: systemStatus.currentJiraUrl,
+            issueUrl: systemStatus.currentIssueUrl,
             prUrl: result.prUrl,
             repoName,
             branch: result.branch, // Needed for check monitoring
@@ -1316,7 +1316,7 @@ async function startPolling() {
                         priority,
                         result: 'Resumed',
                         time: new Date().toLocaleTimeString(),
-                        jiraUrl: `https://github.com/${process.env.GITHUB_ISSUES_REPO}/issues/${issueKey.replace('GH-', '')}`,
+                        issueUrl: `https://github.com/${process.env.GITHUB_ISSUES_REPO}/issues/${issueKey.replace('GH-', '')}`,
                         prUrl: pr.prUrl,
                         repoName: pr.repoName,
                         branch: pr.branch,
