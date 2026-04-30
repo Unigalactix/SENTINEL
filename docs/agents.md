@@ -9,28 +9,28 @@ This document serves as the technical specification for the Autonomous Agents an
 
 ### Core Workflow
 The agent operates on a continuous feedback loop:
-1.  **Poll**: Fetches tickets from Jira (Dynamically discovered projects).
+1.  **Poll**: Fetches open issues from GitHub Issues (configurable repo + label).
 2.  **Prioritize**: Sorts tickets by Priority (Highest → Lowest).
-3.  **Process**: Picks the top ticket and moves it to **"In Progress"**.
+3.  **Process**: Picks the top issue and labels it **`sentinel:in-progress`**.
 4.  **Agentic Analysis**: Uses Azure OpenAI to discover secrets, summarize the repo, and plan the fix.
 5.  **Execute**: Generates Custom Workflow (if needed) or creates Pull Request.
 6.  **Report**:
-    -   **Success**: Comments with PR Link → Transitions to **"Done"**.
-    -   **Failure**: Comments with Error Log → Transitions to **"To Do"**.
+    -   **Success**: Comments with PR Link → Closes the issue (label: `sentinel:in-progress` removed).
+    -   **Failure**: Comments with Error Log → Re-labels as `sentinel:todo`.
 
 ### Integration Specifications
 
-#### Jira Field Mapping
-The agent looks for these fields (smart-mapped from `customfield_` or standard fields):
--   `repo` / `repoName`: Target GitHub Repository (e.g., `Unigalactix/sample-node-project`).
--   `language`: Project tech stack (`node`, `python`, `dotnet`, `java`).
--   `build`: Custom build command (e.g., `npm run build:prod`).
--   `test`: Custom test command.
--   `deploy`: Deployment target (`azure-webapp`, `docker`).
+#### GitHub Issue Field Mapping
+The agent reads directives from the issue body (plain text lines):
+-   `repo:` / `repoName:` — Target GitHub Repository (e.g., `Unigalactix/sample-node-project`).
+-   `language:` — Project tech stack (`node`, `python`, `dotnet`, `java`).
+-   `build:` — Custom build command (e.g., `npm run build:prod`).
+-   `test:` — Custom test command.
+-   `deploy:` — Deployment target (`azure-webapp`, `docker`).
 
 #### Context Awareness (Discovery Priority)
 The agent determines how to build/test a project using this strict precedence order:
-1.  **Jira Ticket**: Explicit fields override everything.
+1.  **GitHub Issue**: Explicit body directives override everything.
 2.  **Instructions File**: Regex parsing of `.github/instructions.md`, `.github/agents.md`, or `README.md`.
     -   *Pattern*: `Build Command: "..."`
 3.  **Deep Code Analysis**: Scanning specific files:
@@ -61,7 +61,7 @@ The agent uses Azure OpenAI to "reason" about the task before execution.
 
 ### Capabilities
 1.  **Repo Summarization**: `summarizeRepo()` - Reads file structure and README.
-2.  **Fix Planning**: `planFix()` - Correlates Jira ticket with Repo Summary.
+2.  **Fix Planning**: `planFix()` - Correlates GitHub Issue with Repo Summary.
 3.  **Workflow Generation**: `generateDraftWorkflow()` - Creates YAML based on the plan and **Available Secrets**.
 
 ### Configuration via `.env`
@@ -102,7 +102,7 @@ Returns a live JSON snapshot of the system state:
 -   `repoName`: String
 -   `ref`: Branch name or Commit SHA
 -   `sentinel://status`: A resource URI to read the live JSON state of the system queue.
--   `add_jira_comment`: Helper tool to post manual comments to tickets.
+-   `add_github_issue_comment`: Helper tool to post manual comments to GitHub Issues.
 
 ---
 
@@ -110,14 +110,14 @@ Returns a live JSON snapshot of the system state:
 
 ```mermaid
 flowchart TD
-    subgraph Jira_World
-        Ticket(New Ticket)
-        Updates[Status Updates]
-        Done(Done State)
+    subgraph GitHub_Issues_World
+        Ticket(New Issue sentinel:todo)
+        Updates[Label: in-progress / Comment]
+        Done(Issue Closed)
     end
 
     subgraph Sentinel_Engine [Node.js Agent - 30s Loop]
-        Poll[Poll 'To Do']
+        Poll[Poll 'sentinel:todo']
         Analyze{Context Analysis}
         Gen[Generate Content]
         Monitor[Monitor CI/CD]

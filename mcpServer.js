@@ -2,7 +2,7 @@ const { McpServer, ResourceTemplate } = require('@modelcontextprotocol/sdk/serve
 const { StdioServerTransport } = require('@modelcontextprotocol/sdk/server/stdio.js');
 const { z } = require('zod');
 const { generateWorkflowFile, getPullRequestChecks } = require('./src/services/githubService');
-const { addComment } = require('./src/services/jiraService');
+const { addComment } = require('./src/services/githubIssueService');
 
 // Create the MCP Server
 const server = new McpServer({
@@ -82,12 +82,12 @@ server.tool(
     }
 );
 
-// 3. Add Jira Comment
+// 3. Add GitHub Issue Comment
 server.tool(
-    "add_jira_comment",
-    "Post a comment to a Jira ticket.",
+    "add_github_issue_comment",
+    "Post a comment to a GitHub Issue.",
     {
-        issueKey: z.string().describe("The Jira Issue Key (e.g., PROJ-123)"),
+        issueKey: z.string().describe("The GitHub Issue Key (format: GH-123)"),
         commentBody: z.string().describe("The text content of the comment")
     },
     async ({ issueKey, commentBody }) => {
@@ -171,15 +171,15 @@ server.tool(
     }
 );
 
-// 7. Get Jira Details
+// 7. Get GitHub Issue Details
 server.tool(
-    "get_jira_details",
-    "Read the full details of a specific Jira ticket.",
+    "get_github_issue",
+    "Read the full details of a specific GitHub Issue.",
     {
-        issueKey: z.string().describe("The Jira Issue Key (e.g., NDE-123)")
+        issueKey: z.string().describe("The GitHub Issue Key (format: GH-123)")
     },
     async ({ issueKey }) => {
-        const { getIssueDetails } = require('./src/services/jiraService');
+        const { getIssueDetails } = require('./src/services/githubIssueService');
         const details = await getIssueDetails(issueKey);
         return {
             content: [{ type: "text", text: JSON.stringify(details, null, 2) }]
@@ -218,7 +218,7 @@ server.tool(
 // 9. Trigger Manual Poll
 server.tool(
     "trigger_manual_poll",
-    "Force the Sentinel to check Jira for new tickets immediately.",
+    "Force the Sentinel to check GitHub Issues for new open issues immediately.",
     {},
     async () => {
         try {
@@ -236,7 +236,7 @@ server.tool(
 // 10. List Active Repos / Projects
 server.tool(
     "list_active_repos",
-    "List all Jira projects currently being monitored by the Sentinel.",
+    "List all GitHub repositories currently being monitored for issues.",
     {},
     async () => {
         try {

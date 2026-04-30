@@ -72,6 +72,28 @@ describe('Service Exports', () => {
         });
     });
 
+    describe('githubIssueService', () => {
+        const githubIssueService = require('../src/services/githubIssueService');
+
+        const expectedExports = [
+            'getPendingTickets',
+            'transitionIssue',
+            'addComment',
+            'getAllProjectKeys',
+            'getIssueDetails',
+            'createIssue',
+            'getProjects',
+            'searchIssues',
+            'updateIssue',
+            'getInspectionTickets'
+        ];
+
+        test.each(expectedExports)('%s is exported and is a function', (fnName) => {
+            expect(githubIssueService[fnName]).toBeDefined();
+            expect(typeof githubIssueService[fnName]).toBe('function');
+        });
+    });
+
     describe('llmService', () => {
         const llmService = require('../src/services/llmService');
 

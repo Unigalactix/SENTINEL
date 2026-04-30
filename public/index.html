@@ -1970,10 +1970,10 @@
 
             // Action Buttons
             let actionsHtml = '';
-            if (item.jiraUrl || item.prUrl) {
+            if (item.issueUrl || item.prUrl) {
                 actionsHtml = `<div style="display:flex; gap:6px; margin-top:10px;">`;
-                if (item.jiraUrl) {
-                    actionsHtml += `<a href="${item.jiraUrl}" target="_blank" class="btn btn-small btn-jira" style="text-decoration:none; padding:4px 8px;">JIRA</a>`;
+                if (item.issueUrl) {
+                    actionsHtml += `<a href="${item.issueUrl}" target="_blank" class="btn btn-small btn-github" style="text-decoration:none; padding:4px 8px;">Issue</a>`;
                 }
                 if (item.prUrl) {
                     actionsHtml += `<a href="${item.prUrl}" target="_blank" class="btn btn-small btn-github" style="text-decoration:none; padding:4px 8px;">PR</a>`;
@@ -2374,8 +2374,8 @@
                     document.getElementById('currentStatusLabel').innerText = 'CURRENTLY PROCESSING';
                     document.getElementById('currentTicketKey').innerText = data.currentTicketKey;
 
-                    if (data.currentJiraUrl) {
-                        btnJira.href = data.currentJiraUrl;
+                    if (data.currentIssueUrl) {
+                        btnJira.href = data.currentIssueUrl;
                         btnJira.removeAttribute('disabled');
                     }
                     if (data.currentPrUrl) {

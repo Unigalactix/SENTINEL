@@ -1,24 +1,24 @@
 # CI/CD Automation Flow (Visio-style)
 
-Below is a high-level flow diagram (Mermaid) showing how the system moves from Jira tickets → Pull Requests → GitHub Actions → Azure → Jira updates, including monitoring and reconciliation on server restarts.
+Below is a high-level flow diagram (Mermaid) showing how the system moves from GitHub Issues → Pull Requests → GitHub Actions → Azure → issue updates, including monitoring and reconciliation on server restarts.
 
 ```mermaid
 flowchart TD
   %% Swimlanes via subgraphs
-  subgraph JIRA[Jira Cloud]
-    J1[Ticket in To Do]
-    J2[Transition to In Progress]
-    J3[Post PR created]
-    J4[Post Ready for Review]
-    J5[Post Deployment Success/Failure]
-    J6[Transition to Done / To Do]
+  subgraph GHISSUES[GitHub Issues]
+    J1[Open Issue (sentinel:todo)]
+    J2[Label: sentinel:in-progress]
+    J3[Comment: PR created]
+    J4[Comment: Ready for Review]
+    J5[Comment: Deployment Success/Failure]
+    J6[Close Issue / Re-label sentinel:todo]
   end
 
   subgraph SERVER[Automation Server]
     S0[Startup]
     SA[Check activeAgents for Token]
-    S1[Poll Jira for To Do]
-    S2[Process Ticket Data]
+    S1[Poll GitHub Issues (sentinel:todo)]
+    S2[Process Issue Data]
     S3[Analyze Repo & Detect Language]
     S3A[Agentic AI: Plan Fix & List Secrets]
     S4[Generate Workflow YAML (Custom/Template)]
@@ -57,7 +57,7 @@ flowchart TD
   %% Main happy path
   J1 -->|Sentinel poll| SA -->|Agent token found| S1 --> S2 --> S3 --> S3A --> S4 --> S5 --> S6 --> S7 --> G1
   SA -->|No agents| SA
-  S2 -->|Transition| J2
+  S2 -->|Label: in-progress| J2
   S7 -->|Comment PR| S8 --> G2
   G1 -->|Triggers| A1 --> A2 --> A3
   A3 -- yes --> A4 --> A5
@@ -70,16 +70,16 @@ flowchart TD
   S9 -->|Failure| S10 --> J5 --> J6
 
   %% Reconciliation on restart
-  S0 --> S11 -->|Org PRs + Jira keys| S9
+  S0 --> S11 -->|Org PRs + Issue keys| S9
 ```
 
 Key Notes
-- **Multi-Tenant Auth**: Poll loop checks `activeAgents` Map via `getFirstAgent()` before scanning Jira. If no agent token is available, it waits for a user login.
+- **Multi-Tenant Auth**: Poll loop checks `activeAgents` Map via `getFirstAgent()` before scanning GitHub Issues. If no agent token is available, it waits for a user login.
 - **Stale Agent Cleanup**: `cleanupStaleAgents()` runs every 15 minutes, removing agents inactive > 1 hour.
 - Build/Test defaults when missing: `npm run build` / `npm test`.
 - Static-site deploys package only `public/` or a minimal `deploy/` folder; validates `index.html`.
-- Deployment URL published via GitHub Deployments and included in Jira comments.
-- On restart, the server reconciles open org PRs → seeds monitoring for tickets in active statuses.
+- Deployment URL published via GitHub Deployments and included in issue comments.
+- On restart, the server reconciles open org PRs → seeds monitoring for issues in active statuses.
 
 How to View
 - GitHub renders Mermaid diagrams natively in Markdown.
