@@ -5,17 +5,17 @@ This document serves as the technical specification for the Autonomous Agents an
 ## 1. Sentinel Agent
 **Runtime**: Node.js (`server.js`)
 **Role**: DevOps Engineer
-**Loop Interval**: 30 Seconds
+**Trigger**: Manual — via **Scan Now** dashboard button or `POST /api/poll`
 
 ### Core Workflow
-The agent operates on a continuous feedback loop:
-1.  **Poll**: Fetches open issues from GitHub Issues (configurable repo + label).
-2.  **Prioritize**: Sorts tickets by Priority (Highest → Lowest).
+The agent operates as a one-shot scan triggered by the user or the API:
+1.  **Scan**: Fetches open issues from GitHub Issues (configurable repo + label, default `sentinel:todo`).
+2.  **Prioritize**: Sorts issues by Priority (Highest → Lowest).
 3.  **Process**: Picks the top issue and labels it **`sentinel:in-progress`**.
 4.  **Agentic Analysis**: Uses Azure OpenAI to discover secrets, summarize the repo, and plan the fix.
 5.  **Execute**: Generates Custom Workflow (if needed) or creates Pull Request.
 6.  **Report**:
-    -   **Success**: Comments with PR Link → Closes the issue (label: `sentinel:in-progress` removed).
+    -   **Success**: Comments with PR Link → Closes the issue (`sentinel:in-progress` removed).
     -   **Failure**: Comments with Error Log → Re-labels as `sentinel:todo`.
 
 ### Integration Specifications
@@ -116,8 +116,9 @@ flowchart TD
         Done(Issue Closed)
     end
 
-    subgraph Sentinel_Engine [Node.js Agent - 30s Loop]
-        Poll[Poll 'sentinel:todo']
+    subgraph Sentinel_Engine [Node.js Agent — Manual Trigger]
+        Trigger[POST /api/poll]
+        Poll[Scan 'sentinel:todo']
         Analyze{Context Analysis}
         Gen[Generate Content]
         Monitor[Monitor CI/CD]
@@ -131,8 +132,7 @@ flowchart TD
         Action[GitHub Actions]
     end
 
-    Ticket --> Poll
-    Poll --> Analyze
+    Ticket --> Trigger --> Poll --> Analyze
     Analyze -- 1. Read Files --> Repo
     Analyze -- 2. Detect Strategy --> Gen
     Gen -- 3. Commit & Open PR --> Branch
@@ -157,7 +157,7 @@ The system supports multiple logged-in users simultaneously. Each OAuth login cr
 | `registerAgent(user, token, hasCopilot)` | Creates/updates agent on OAuth login |
 | `removeAgent(userId)` | Removes agent on logout |
 | `getAgent(userId)` | Looks up agent by user ID |
-| `getFirstAgent()` | Fallback for single-user mode (polling) |
+| `getFirstAgent()` | Fallback for single-user mode (scan trigger) |
 | `cleanupStaleAgents()` | Removes agents inactive > 1 hour (runs every 15 min) |
 
 ### Agent Context Shape
@@ -176,7 +176,7 @@ The system supports multiple logged-in users simultaneously. Each OAuth login cr
 ### Dashboard
 - Header displays agent count badge when > 1 user is logged in
 - User avatar + login name shown for the current OAuth user
-- Poll loop uses `getFirstAgent()` token when `activeUserToken` is null
+- Scan uses `getFirstAgent()` token when `activeUserToken` is null
 
 ---
 
@@ -185,12 +185,13 @@ The system supports multiple logged-in users simultaneously. Each OAuth login cr
 **Role**: Real-Time Monitoring UI
 
 ### Features
-- **Timer/Phase Indicator**: Shows current phase (Scanning, Processing, Waiting, Paused)
-- **Terminal Feed**: Live scrolling logs from ticket processing
-- **Inspection Panel**: INS board tickets fetched on independent 60-second timer
-- **Pause/Resume Toggle**: Stops/starts ticket processing without logout
+- **Scan Now Button**: Triggers an immediate one-shot issue scan via `POST /api/poll`
+- **Phase Indicator**: Shows current phase (Scanning, Processing, Ready, Paused)
+- **Terminal Feed**: Live scrolling logs from issue processing
+- **Inspection Panel**: GitHub inspection issues fetched on independent 60-second timer
 - **Agent Badge**: Shows active agent count in header (multi-tenant)
 - **Copilot Banner**: Indicates if GitHub Copilot is enabled for the session
+- **New Issue Button**: Opens modal to manually create a GitHub Issue in the configured repo
 
 ---
 

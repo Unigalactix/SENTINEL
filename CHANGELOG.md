@@ -6,6 +6,44 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [3.0.0] - 2026-04-30
+
+### Added
+- **GitHub Issues Migration**: Sentinel now reads from and writes to **GitHub Issues** exclusively. `githubIssueService.js` handles all issue polling, creation, updating, and commenting.
+- **Post-Inspection Issue Creation**: `/api/inspect` now auto-creates a GitHub Issue in `GITHUB_ISSUES_REPO` with full inspection findings and a `sentinel:todo` label after every successful repo scan. The response includes `issueKey` and `issueUrl` for immediate navigation.
+- **`getActiveOrgPRsWithGHKeys`**: New function in `githubService.js` that discovers open org PRs referencing `GH-NNN` keys in title, body, or branch name—replaces the Jira-key reconciliation logic.
+- **`/api/issues-source` Endpoint**: Returns the configured `GITHUB_ISSUES_REPO` and label to the dashboard (avoids `process.env` in browser JavaScript).
+- **`sentinel:todo` Label Support**: Inspection results are filed with the `sentinel:todo` label so they are automatically picked up on the next scan.
+
+### Changed
+- **Manual-Only Polling**: Removed all automatic 30-second `setTimeout(poll, ...)` scheduling. `poll()` is now a one-shot function invoked exclusively on demand.
+  - Dashboard: "Scan Now" button triggers `POST /api/poll`
+  - Idle system phase is now **"Ready"** (was "Waiting")
+- **`global.forcePoll` Fixed**: Was a no-op comment; now correctly set to `poll` at the end of `startPolling()` so the `/api/poll` endpoint always invokes the real scan function.
+- **`/api/poll` Concurrency Guard**: Returns `{ phase }` without re-triggering if a scan is already in progress.
+- **`reconcileActivePRsOnStartup`**: Switched from `getActiveOrgPRsWithJiraKeys` (Jira `ABC-123`) to `getActiveOrgPRsWithGHKeys` (`GH-NNN`). `issueUrl` construction is now null-safe.
+- **`scripts/inspect_repo.js`**: Replaced `jiraService` import with `githubIssueService`. Removed `JIRA_PROJECT_KEY` dependency. `processRepo()` returns `{ issueKey, issueUrl }`.
+- **Error handling in inspect_repo.js**: Fixed try/catch structure to ensure `return` is only reached on success; outer catch handles search failures gracefully.
+- **Status filter regex** in `inspect_repo.js`: Changed from loose `/done|closed|resolved/i` to strict `/^(done|closed|resolved)$/i` to prevent false positives (e.g. "Postponed").
+
+### Removed
+- **Automatic 30-second polling timer** (`POLL_INTERVAL_MS` constant and all `setTimeout(poll, POLL_INTERVAL_MS)` calls)
+- **Jira fields from Secrets Sidebar**: Removed Jira Base URL, Jira Email, and Jira API Token input fields
+- **Jira-style countdown timer** from the dashboard header
+- **"MCP Inspector" launch button** (dev tool) from the dashboard
+- **Jira project selection step** from the setup checklist panel
+- **`onboardingProjects` / `selectedJiraProject`** browser state and related localStorage helpers (`getStoredJiraProject`, `setStoredJiraProject`, `ensureOnboardingProjectsLoaded`)
+
+### UI Changes
+- **Dashboard header**: Countdown timer replaced with a prominent **"Scan Now"** button that shows "Scanning…" while active
+- **"Jira Ticket" hero button** renamed to **"GitHub Issue"**
+- **"Create Jira Ticket" modal** renamed to **"Create GitHub Issue"**
+- **Setup checklist**: Replaced "Select primary Jira project" step with "GitHub Issues Repo configured" step
+- **Inspections panel**: GitHub issue URLs now fetched via `/api/issues-source` (browser-compatible); creation dates restored in the listing
+- **Secrets sidebar**: Now only shows GitHub Token, GitHub Org, GitHub Issues Repo, and LLM Key
+
+---
+
 ## [2.1.0] - 2026-02-09
 
 ### Added

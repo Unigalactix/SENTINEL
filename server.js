@@ -20,7 +20,7 @@ const {
     enablePullRequestAutoMerge,
     isPullRequestMerged,
     approvePullRequest,
-    getActiveOrgPRsWithJiraKeys,
+    getActiveOrgPRsWithGHKeys,
     listRepoSecrets,
     // Per-user auth functions
     getOctokit,
@@ -63,7 +63,6 @@ function getPostPrStatusForIssue(issue) {
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const POLL_INTERVAL_MS = 30000; // Poll every 30 seconds
 const USE_GH_COPILOT = process.env.USE_GH_COPILOT === 'true';
 const { execFile } = require('child_process');
 
@@ -79,8 +78,8 @@ let systemStatus = {
     currentIssueUrl: null,      // URL to the current GitHub Issue
     currentPrUrl: null,        // New: URL to created PR
     currentPayload: null,      // New: Generated YAML content
-    nextScanTime: Date.now() + 1000,
-    paused: false,             // Pause state
+    nextScanTime: null,
+    paused: false,             // Pause state (kept for compatibility)
     systemLogs: [],            // Global system log stream for UI terminal
     // Per-user auth state (DEPRECATED - use activeAgents instead)
     activeUserToken: null,           // OAuth access token from logged-in user
@@ -549,24 +548,16 @@ app.get('/api/projects', async (req, res) => {
 
 // Manual Poll Trigger
 app.post('/api/poll', (req, res) => {
-    console.log('[API] Check triggering manual poll...');
-    // We can't easily call the internal 'poll' function because it's inside startPolling closure.
-    // However, we can toggle a flag or just restart the process? 
-    // Actually, let's just expose a global emitter or a simpler way?
-    // For now, let's just log it. Real implementation would require refactoring startPolling.
-    // WAIT! We can move 'poll' to outer scope or attach it to app.
-    // Expose forcePoll appropriately
+    console.log('[API] Manual scan triggered...');
     if (global.forcePoll && typeof global.forcePoll === 'function') {
-        global.forcePoll();
-        return res.json({ message: 'Poll triggered successfully' });
-    } else {
-        console.warn('[API] Poll function not ready or not exposed.');
-        // Try to trigger it by resetting nextScanTime if systemStatus is available
-        if (systemStatus) {
-            systemStatus.nextScanTime = Date.now();
-            return res.json({ message: 'Poll scheduled immediately (via timer reset)' });
+        // Don't allow concurrent scans
+        if (systemStatus.currentPhase === 'Scanning' || systemStatus.currentPhase === 'Processing') {
+            return res.json({ message: 'Scan already in progress', phase: systemStatus.currentPhase });
         }
-        return res.status(503).json({ message: 'Poll function not ready' });
+        global.forcePoll();
+        return res.json({ message: 'Scan triggered successfully' });
+    } else {
+        return res.status(503).json({ message: 'Scan function not ready yet' });
     }
 });
 
@@ -783,7 +774,7 @@ app.get('/api/inspections', async (req, res) => {
 });
 
 app.post('/api/inspect', async (req, res) => {
-    const { repoName } = req.body;
+    const { repoName, createIssue: shouldCreateIssue = true } = req.body;
     if (!repoName) return res.status(400).json({ error: 'repoName is required' });
 
     console.log(`[API] Triggering inspection for ${repoName}`);
@@ -795,17 +786,24 @@ app.post('/api/inspect', async (req, res) => {
     try {
         const { processRepo } = require('./scripts/inspect_repo');
         // Run inspection with a custom logger that feeds into UI logs
-        await processRepo(repoName, false, (msg) => {
+        // processRepo returns the created/updated issue key if any
+        const inspectResult = await processRepo(repoName, false, (msg) => {
             logProgress(msg);
         });
         logProgress(`Inspection complete for ${repoName}.`);
-        res.json({ message: 'Inspection complete' });
+
+        const response = { message: 'Inspection complete' };
+        if (inspectResult && inspectResult.issueKey) {
+            response.issueKey = inspectResult.issueKey;
+            response.issueUrl = inspectResult.issueUrl;
+        }
+        res.json(response);
     } catch (e) {
         logProgress(`Error during inspection: ${e.message}`);
         res.status(500).json({ error: e.message });
     } finally {
         setTimeout(() => {
-            systemStatus.currentPhase = 'Waiting';
+            systemStatus.currentPhase = 'Ready';
             systemStatus.currentTicketKey = null;
         }, 5000);
     }
@@ -1292,13 +1290,13 @@ async function startPolling() {
         try {
             const org = process.env.GHUB_ORG || 'Unigalactix';
             writeLog(`[Sentinel] Reconciling active PRs in org: ${org}`);
-            const prs = await getActiveOrgPRsWithJiraKeys({ org });
+            const prs = await getActiveOrgPRsWithGHKeys({ org });
             if (!Array.isArray(prs) || prs.length === 0) {
-                writeLog('[Sentinel] No open PRs with Jira keys found to reconcile.');
+                writeLog('[Sentinel] No open PRs with GitHub issue keys found to reconcile.');
                 return;
             }
             for (const pr of prs) {
-                const issueKey = pr.jiraKey;
+                const issueKey = pr.issueKey;
                 try {
                     const issue = await getIssueDetails(issueKey);
                     const statusName = issue?.fields?.status?.name || '';
@@ -1316,7 +1314,9 @@ async function startPolling() {
                         priority,
                         result: 'Resumed',
                         time: new Date().toLocaleTimeString(),
-                        issueUrl: `https://github.com/${process.env.GITHUB_ISSUES_REPO}/issues/${issueKey.replace('GH-', '')}`,
+                        issueUrl: process.env.GITHUB_ISSUES_REPO
+                            ? `https://github.com/${process.env.GITHUB_ISSUES_REPO}/issues/${issueKey.replace(/^GH-/i, '')}`
+                            : null,
                         prUrl: pr.prUrl,
                         repoName: pr.repoName,
                         branch: pr.branch,
@@ -1336,7 +1336,7 @@ async function startPolling() {
                     };
                     systemStatus.scanHistory.unshift(historyItem);
                     systemStatus.monitoredTickets.push(historyItem);
-                    writeLog(`[Sentinel] Resumed monitoring PR ${pr.prUrl} for ticket ${issueKey}.`);
+                    writeLog(`[Sentinel] Resumed monitoring PR ${pr.prUrl} for issue ${issueKey}.`);
                     try {
                         await addComment(issueKey, `🔁 Server restarted: resuming monitoring for active PR\nPR: ${pr.prUrl}`);
                     } catch (_) { }
@@ -1354,17 +1354,9 @@ async function startPolling() {
             // Ensure global OAuth token used by background workers is still valid
             await ensureGlobalAccessTokenFresh();
             if (systemStatus.paused) {
-                // If paused, just update next scan time to keep UI alive but don't scan
-                // [FIX] Don't overwrite status if we are manually inspecting
-                if (systemStatus.currentTicketKey && systemStatus.currentTicketKey.startsWith('INSPECT:')) {
-                    setTimeout(poll, POLL_INTERVAL_MS);
-                    return;
-                }
-
                 systemStatus.currentPhase = 'Paused';
                 systemStatus.currentTicketKey = 'PAUSED';
-                systemStatus.nextScanTime = Date.now() + POLL_INTERVAL_MS;
-                setTimeout(poll, POLL_INTERVAL_MS);
+                systemStatus.nextScanTime = null;
                 return;
             }
 
@@ -1376,9 +1368,8 @@ async function startPolling() {
             if (!activeToken) {
                 systemStatus.currentPhase = 'Waiting for Login';
                 systemStatus.currentTicketKey = 'LOGIN_REQUIRED';
-                systemStatus.currentTicketLogs = ['⚠️ Please login with GitHub to start processing tickets'];
-                systemStatus.nextScanTime = Date.now() + POLL_INTERVAL_MS;
-                setTimeout(poll, POLL_INTERVAL_MS);
+                systemStatus.currentTicketLogs = ['⚠️ Please login with GitHub to start processing issues'];
+                systemStatus.nextScanTime = null;
                 return;
             }
 
@@ -1393,12 +1384,8 @@ async function startPolling() {
             // PHASE: Scanning
             systemStatus.currentPhase = 'Scanning';
             systemStatus.nextScanTime = null;
-            // Clear logs if we are starting a fresh scan and nothing is active
-            if (!systemStatus.currentTicketKey) {
-                // systemStatus.currentTicketLogs = []; // Optional: clear logs between scans
-            }
 
-            writeLog('Polling for new tickets...');
+            writeLog('Scanning GitHub Issues for new tickets...');
 
             let issues = await getPendingTickets();
 
@@ -1418,18 +1405,15 @@ async function startPolling() {
                     await processTicketData(issue);
                 }
             } else {
-                writeLog('No tickets found.');
+                writeLog('No pending issues found.');
             }
         } catch (error) {
-            writeLog(`Polling error: ${error.message}`);
+            writeLog(`Scan error: ${error.message}`);
         } finally {
-            // PHASE: Waiting
-            systemStatus.currentPhase = 'Waiting';
-            systemStatus.currentTicketKey = null; // Reset info display when waiting
-            systemStatus.nextScanTime = Date.now() + POLL_INTERVAL_MS;
-
-            // Schedule next poll
-            setTimeout(poll, POLL_INTERVAL_MS);
+            // PHASE: Ready (waiting for next manual trigger)
+            systemStatus.currentPhase = 'Ready';
+            systemStatus.currentTicketKey = null;
+            systemStatus.nextScanTime = null;
         }
     };
 
@@ -1531,10 +1515,15 @@ async function startPolling() {
         }
     };
 
-    // Reconcile once then start polling
+    // Reconcile once on startup, then wait for manual trigger
     await reconcileActivePRsOnStartup();
 
-    poll();
+    // Expose poll function globally for manual trigger via /api/poll
+    global.forcePoll = poll;
+
+    // Set initial phase to Ready (manual triggers only)
+    systemStatus.currentPhase = 'Ready';
+
     monitorChecks();
 }
 
@@ -1549,14 +1538,6 @@ app.listen(PORT, async () => {
     writeLog(`GitHub Token present: ${!!ghToken}`);
     writeLog(`GitHub Issues Repo: ${issuesRepo}`);
     writeLog(`GH Copilot enabled: ${copilotEnabled}`);
-
-    // Allow global trigger
-    global.forcePoll = async () => {
-        writeLog('Forcing poll...');
-        // We can't actually force the inner loop easily without refactor.
-        // Assuming the loop is running, we just wait.
-        // Real implementation would reset timer.
-    };
 
     startPolling();
 });
