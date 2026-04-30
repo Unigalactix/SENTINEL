@@ -13,22 +13,12 @@ const llmService = require('../src/services/llmService');
 const { runDevOpsScan } = require('../src/services/devopsChecks');
 const {
     createIssue,
-    getProjects,
     searchIssues,
     updateIssue,
     addComment
-} = require('../src/services/jiraService');
+} = require('../src/services/githubIssueService');
 const dotenv = require('dotenv');
 dotenv.config();
-
-const { JIRA_PROJECT_KEY } = process.env;
-
-if (!JIRA_PROJECT_KEY) {
-    if (require.main === module) {
-        console.error('❌ Error: JIRA_PROJECT_KEY is not defined in .env file.');
-        process.exit(1);
-    }
-}
 
 // --- Config Loading ---
 const CONFIG_PATH = path.join(__dirname, '..', 'config', 'repo-inspector.config.json');
@@ -261,20 +251,20 @@ async function processRepo(repoName, autoFix = false, logger = console.log) {
         const ticketSummary = `Repo Health Remediation: ${repoName}`;
 
         try {
-            // Determine JIRA Project - prioritize INS for inspection results
-            const JIRA_KEY = 'INS';
+            const ISSUES_REPO = process.env.GITHUB_ISSUES_REPO;
 
-            // Search for existing ticket (Open only)
-            const safeSummary = ticketSummary.replace(/"/g, '\\"');
-            // JQL: Find tickets with same summary in this project that are NOT Done
-            // We assume "Done" category covers Closed/Resolved.
-            const jql = `project = "${JIRA_KEY}" AND summary ~ "${safeSummary}" AND statusCategory != Done`;
+            // Search for an existing open GitHub issue with the same summary
+            const existingIssues = await searchIssues(ticketSummary);
+            const existingOpen = existingIssues.filter(i => {
+                const status = i.fields?.status?.name || '';
+                return !/done|closed|resolved/i.test(status);
+            });
 
-            const existingIssues = await searchIssues(jql);
+            let issueKey, issueUrl;
 
-            if (existingIssues.length > 0) {
-                const issueKey = existingIssues[0].key;
-                log(`       🔄 Found open ticket ${issueKey}. Updating...`);
+            if (existingOpen.length > 0) {
+                issueKey = existingOpen[0].key;
+                log(`       🔄 Found open issue ${issueKey}. Updating...`);
 
                 // Update description with latest findings
                 await updateIssue(issueKey, {
@@ -282,16 +272,22 @@ async function processRepo(repoName, autoFix = false, logger = console.log) {
                 });
 
                 // Add a comment to notify
-                await addComment(issueKey, `🔄 Automated Scan Updated\nScan found ${findings.length} issues. Ticket description updated.`);
+                await addComment(issueKey, `🔄 Automated Scan Updated\nScan found ${findings.length} issues. Issue description updated.`);
                 log(`       ✅ Updated ${issueKey}`);
             } else {
-                // Create New (Project INS requires 'Initiative' type)
-                const ticket = await createIssue(JIRA_KEY, ticketSummary, fullDescription, 'Initiative');
-                log(`       ✅ Created Master Ticket ${ticket.key}`);
+                // Create a new GitHub issue
+                const issueResult = await createIssue(ISSUES_REPO, ticketSummary, fullDescription, { priorityName: 'High' });
+                issueKey = issueResult.key;
+                log(`       ✅ Created GitHub Issue ${issueKey}`);
             }
 
+            if (ISSUES_REPO && issueKey) {
+                issueUrl = `https://github.com/${ISSUES_REPO}/issues/${issueKey.replace(/^GH-/i, '')}`;
+            }
+            return { issueKey, issueUrl };
+
         } catch (err) {
-            error(`       ❌ Orchestration failed: ${err.message}`);
+            error(`       ❌ Issue creation/update failed: ${err.message}`);
         }
     }
 }
@@ -342,7 +338,7 @@ async function main() {
 
     } else {
         console.log('--- GitHub Repo Health Inspector (Interactive) ---');
-        console.log(`Target Jira Project: ${process.env.JIRA_PROJECT_KEY}`);
+        console.log(`Target Issues Repo: ${process.env.GITHUB_ISSUES_REPO || '(GITHUB_ISSUES_REPO not set)'}`);
 
         const repos = await listAccessibleRepos();
         let repoName = '';

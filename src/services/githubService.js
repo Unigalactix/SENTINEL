@@ -1274,6 +1274,43 @@ function extractJiraKeyFromText(text) {
     return match ? match[1] : null;
 }
 
+// Extract a GitHub issue key like GH-123 from text
+function extractGHIssueKeyFromText(text) {
+    if (!text) return null;
+    const match = String(text).match(/\bGH-(\d+)\b/i);
+    return match ? `GH-${match[1]}` : null;
+}
+
+// Get open org PRs with inferred GitHub issue keys (GH-NNN) for reconciliation
+async function getActiveOrgPRsWithGHKeys({ org, maxPages = 4 }) {
+    const results = [];
+    for (let page = 1; page <= maxPages; page++) {
+        const items = await listOpenOrgPullRequests({ org, page });
+        if (!items.length) break;
+        for (const item of items) {
+            if (!item.repoFullName) continue;
+            try {
+                const pr = await getPullRequestDetailsByRepo({ repoFullName: item.repoFullName, number: item.number });
+                const keyFromTitle = extractGHIssueKeyFromText(pr.title);
+                const keyFromBody = extractGHIssueKeyFromText(pr.body);
+                const keyFromBranch = extractGHIssueKeyFromText(pr.head && pr.head.ref);
+                const issueKey = keyFromTitle || keyFromBody || keyFromBranch;
+                results.push({
+                    repoName: item.repoFullName,
+                    prNumber: pr.number,
+                    prUrl: pr.html_url,
+                    branch: pr.head && pr.head.ref,
+                    headSha: pr.head && pr.head.sha,
+                    issueKey
+                });
+            } catch (e) {
+                console.warn('Failed to fetch PR details for', item.repoFullName, item.number, e.message);
+            }
+        }
+    }
+    return results.filter(r => !!r.issueKey);
+}
+
 // List open PRs across an organization using the Search API
 async function listOpenOrgPullRequests({ org, perPage = 50, page = 1 }) {
     const { data } = await octokit.search.issuesAndPullRequests({
@@ -1657,6 +1694,7 @@ module.exports = {
     summarizeFailureFromRun,
     getLatestDeploymentUrl,
     getActiveOrgPRsWithJiraKeys,
+    getActiveOrgPRsWithGHKeys,
     getRepoRootFiles,
     getRepoFileContent,
     getRepoDirectoryFiles,
