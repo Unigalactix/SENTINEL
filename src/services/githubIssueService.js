@@ -5,18 +5,45 @@ const GITHUB_ISSUES_REPO = process.env.GITHUB_ISSUES_REPO;
 const GITHUB_ISSUES_LABEL = process.env.GITHUB_ISSUES_LABEL || 'sentinel:todo';
 
 /**
- * Resolve the GitHub token to use for API calls.
- * Mirrors the token resolution pattern used in githubService.js.
+ * Module-level active OAuth token used as a default when no explicit token
+ * is passed to a function. server.js calls setActiveIssueToken() whenever the
+ * primary agent's token changes (login / token refresh / logout).
  */
-function getToken() {
+let activeIssueToken = null;
+
+/**
+ * Set the active OAuth token used for GitHub Issue operations.
+ * @param {string|null} token
+ */
+function setActiveIssueToken(token) {
+    activeIssueToken = token || null;
+}
+
+/**
+ * Resolve the GitHub token to use for API calls.
+ * Priority:
+ *   1. Explicit token argument (per-request OAuth token from agent / session)
+ *   2. Module-level active OAuth token (set via setActiveIssueToken)
+ *   3. GHUB_TOKEN env var (fallback PAT for background jobs / local dev)
+ *
+ * @param {string} [token] - Optional explicit token to use for this call.
+ * @returns {string|null}
+ */
+function resolveToken(token) {
+    if (typeof token === 'string' && token.length > 0) return token;
+    if (activeIssueToken) return activeIssueToken;
     return process.env.GHUB_TOKEN || null;
 }
 
 /**
  * Helper to make GitHub REST API requests.
+ * @param {string} path - API path (e.g. "/repos/owner/repo/issues")
+ * @param {string} [method] - HTTP method
+ * @param {object} [body] - Optional JSON body
+ * @param {string} [token] - Optional explicit OAuth token to use
  */
-async function githubRequest(path, method = 'GET', body = null) {
-    const token = getToken();
+async function githubRequest(path, method = 'GET', body = null, token = null) {
+    const resolvedToken = resolveToken(token);
     return new Promise((resolve, reject) => {
         const url = new URL(`https://api.github.com${path}`);
 
@@ -27,8 +54,8 @@ async function githubRequest(path, method = 'GET', body = null) {
             'X-GitHub-Api-Version': '2022-11-28'
         };
 
-        if (token) {
-            headers['Authorization'] = `token ${token}`;
+        if (resolvedToken) {
+            headers['Authorization'] = `token ${resolvedToken}`;
         }
 
         const options = {
@@ -69,11 +96,16 @@ async function githubRequest(path, method = 'GET', body = null) {
 /**
  * Parse directives from issue body.
  * Supports both bold (**key:** value) and plain (key: value) formats.
+ * Tolerates the colon being inside or outside the bold markers.
  */
 function parseBodyDirective(body, key) {
     if (!body || typeof body !== 'string') return null;
-    // Match **key:** value or key: value at the start of a line
-    const pattern = new RegExp(`^\\*{0,2}${key}\\*{0,2}:\\s*(.+)$`, 'im');
+    // Accept: "key: value", "**key:** value", "**key**: value"
+    const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const pattern = new RegExp(
+        `^\\s*\\*{0,2}${escapedKey}\\s*(?::\\*{0,2}|\\*{0,2}:)\\s*(.+?)\\s*$`,
+        'im'
+    );
     const match = body.match(pattern);
     return match ? match[1].trim() : null;
 }
@@ -92,6 +124,9 @@ function derivePriority(labels) {
 
 /**
  * Map a raw GitHub issue to the shape that server.js understands.
+ * The mapped issue exposes both `id` and `number` (which are the same value —
+ * the human-readable GitHub issue number used in URLs), as well as the
+ * Sentinel-style `key` ("GH-<number>").
  */
 function mapIssue(issue) {
     const body = issue.body || '';
@@ -99,6 +134,7 @@ function mapIssue(issue) {
 
     return {
         id: issue.number,
+        number: issue.number,
         key: `GH-${issue.number}`,
         fields: {
             summary: issue.title,
@@ -124,8 +160,9 @@ function parseIssueNumber(issueKey) {
 
 /**
  * Fetch open issues with the sentinel:todo label, ordered by priority label then creation date.
+ * @param {string} [token] - Optional OAuth token to use for this call.
  */
-async function getPendingTickets() {
+async function getPendingTickets(token = null) {
     if (!GITHUB_ISSUES_REPO) {
         console.warn('[GitHub Issue Service] GITHUB_ISSUES_REPO is not set. Set it to "owner/repo" format (e.g., "Unigalactix/SENTINEL"). Returning empty list.');
         return [];
@@ -134,7 +171,10 @@ async function getPendingTickets() {
     try {
         const label = encodeURIComponent(GITHUB_ISSUES_LABEL);
         const issues = await githubRequest(
-            `/repos/${GITHUB_ISSUES_REPO}/issues?state=open&labels=${label}&per_page=50&sort=created&direction=asc`
+            `/repos/${GITHUB_ISSUES_REPO}/issues?state=open&labels=${label}&per_page=50&sort=created&direction=asc`,
+            'GET',
+            null,
+            token
         );
 
         if (!Array.isArray(issues)) return [];
@@ -161,15 +201,24 @@ async function getPendingTickets() {
  * - 'In Progress': remove sentinel:todo, add sentinel:in-progress
  * - 'Done':        remove sentinel:in-progress, close the issue
  * - 'To Do':       remove sentinel:in-progress, add sentinel:todo, reopen if closed
+ *
+ * @param {string} issueKey
+ * @param {string} targetStatusName
+ * @param {string} [token] - Optional OAuth token to use for this call.
  */
-async function transitionIssue(issueKey, targetStatusName) {
+async function transitionIssue(issueKey, targetStatusName, token = null) {
     if (!GITHUB_ISSUES_REPO) return;
 
     const issueNumber = parseIssueNumber(issueKey);
 
     try {
         // Fetch current labels
-        const issue = await githubRequest(`/repos/${GITHUB_ISSUES_REPO}/issues/${issueNumber}`);
+        const issue = await githubRequest(
+            `/repos/${GITHUB_ISSUES_REPO}/issues/${issueNumber}`,
+            'GET',
+            null,
+            token
+        );
         const currentLabels = (issue.labels || []).map(l => l.name);
 
         let newLabels = [...currentLabels];
@@ -194,7 +243,12 @@ async function transitionIssue(issueKey, targetStatusName) {
         const updateBody = { labels: newLabels };
         if (newState) updateBody.state = newState;
 
-        await githubRequest(`/repos/${GITHUB_ISSUES_REPO}/issues/${issueNumber}`, 'PATCH', updateBody);
+        await githubRequest(
+            `/repos/${GITHUB_ISSUES_REPO}/issues/${issueNumber}`,
+            'PATCH',
+            updateBody,
+            token
+        );
         console.log(`[GitHub Issue Service] Transitioned ${issueKey} to "${targetStatusName}"`);
     } catch (error) {
         console.error(`[GitHub Issue Service] Error transitioning ${issueKey}:`, error.message);
@@ -204,8 +258,11 @@ async function transitionIssue(issueKey, targetStatusName) {
 /**
  * Post a comment to a GitHub issue.
  * issueKey is in the format "GH-123".
+ * @param {string} issueKey
+ * @param {string} body
+ * @param {string} [token] - Optional OAuth token to use for this call.
  */
-async function addComment(issueKey, body) {
+async function addComment(issueKey, body, token = null) {
     if (!GITHUB_ISSUES_REPO) return;
 
     const issueNumber = parseIssueNumber(issueKey);
@@ -214,7 +271,8 @@ async function addComment(issueKey, body) {
         await githubRequest(
             `/repos/${GITHUB_ISSUES_REPO}/issues/${issueNumber}/comments`,
             'POST',
-            { body }
+            { body },
+            token
         );
         console.log(`[GitHub Issue Service] Added comment to ${issueKey}`);
     } catch (error) {
@@ -225,10 +283,11 @@ async function addComment(issueKey, body) {
 /**
  * Return a list of unique repos referenced across all open sentinel:todo issues.
  * Used to replace /api/projects (Jira project list).
+ * @param {string} [token]
  */
-async function getProjects() {
+async function getProjects(token = null) {
     try {
-        const issues = await getPendingTickets();
+        const issues = await getPendingTickets(token);
         const repos = new Set();
 
         if (GITHUB_ISSUES_REPO) {
@@ -257,15 +316,22 @@ async function getAllProjectKeys() {
 /**
  * Fetch full details of a single issue by key ("GH-123").
  * Returns the same shape as getPendingTickets() items.
+ * @param {string} issueKey
+ * @param {string} [token]
  */
-async function getIssueDetails(issueKey) {
+async function getIssueDetails(issueKey, token = null) {
     if (!GITHUB_ISSUES_REPO) throw new Error('GITHUB_ISSUES_REPO environment variable is required. Set it to "owner/repo" format (e.g., "Unigalactix/SENTINEL").');
 
     const issueNumber = parseIssueNumber(issueKey);
 
     try {
         console.log(`[GitHub Issue Service] Fetching details for ${issueKey}...`);
-        const issue = await githubRequest(`/repos/${GITHUB_ISSUES_REPO}/issues/${issueNumber}`);
+        const issue = await githubRequest(
+            `/repos/${GITHUB_ISSUES_REPO}/issues/${issueNumber}`,
+            'GET',
+            null,
+            token
+        );
         return mapIssue(issue);
     } catch (error) {
         console.error(`[GitHub Issue Service] Error fetching issue ${issueKey}:`, error.message);
@@ -275,13 +341,15 @@ async function getIssueDetails(issueKey) {
 
 /**
  * Search issues by a text query (title/body match).
+ * @param {string} query
+ * @param {string} [token]
  */
-async function searchIssues(query) {
+async function searchIssues(query, token = null) {
     if (!GITHUB_ISSUES_REPO) return [];
 
     try {
         const q = encodeURIComponent(`${query} repo:${GITHUB_ISSUES_REPO} is:issue`);
-        const result = await githubRequest(`/search/issues?q=${q}&per_page=10`);
+        const result = await githubRequest(`/search/issues?q=${q}&per_page=10`, 'GET', null, token);
         const items = result.items || [];
         return items.map(mapIssue);
     } catch (error) {
@@ -292,8 +360,13 @@ async function searchIssues(query) {
 
 /**
  * Create a new GitHub issue in the issues repo.
+ * @param {string} repo
+ * @param {string} title
+ * @param {string} body
+ * @param {object} [options]
+ * @param {string} [token]
  */
-async function createIssue(repo, title, body, options = {}) {
+async function createIssue(repo, title, body, options = {}, token = null) {
     const targetRepo = repo || GITHUB_ISSUES_REPO;
     if (!targetRepo) throw new Error('No target repo specified for createIssue');
 
@@ -316,7 +389,7 @@ async function createIssue(repo, title, body, options = {}) {
             }
         }
 
-        const result = await githubRequest(`/repos/${targetRepo}/issues`, 'POST', issueBody);
+        const result = await githubRequest(`/repos/${targetRepo}/issues`, 'POST', issueBody, token);
         console.log(`[GitHub Issue Service] Created issue: GH-${result.number}`);
         return mapIssue(result);
     } catch (error) {
@@ -327,8 +400,11 @@ async function createIssue(repo, title, body, options = {}) {
 
 /**
  * Update title/body of an existing issue.
+ * @param {string} issueKey
+ * @param {object} fields
+ * @param {string} [token]
  */
-async function updateIssue(issueKey, fields) {
+async function updateIssue(issueKey, fields, token = null) {
     if (!GITHUB_ISSUES_REPO) throw new Error('GITHUB_ISSUES_REPO environment variable is required. Set it to "owner/repo" format (e.g., "Unigalactix/SENTINEL").');
 
     const issueNumber = parseIssueNumber(issueKey);
@@ -341,7 +417,8 @@ async function updateIssue(issueKey, fields) {
         await githubRequest(
             `/repos/${GITHUB_ISSUES_REPO}/issues/${issueNumber}`,
             'PATCH',
-            updateBody
+            updateBody,
+            token
         );
         console.log(`[GitHub Issue Service] Updated issue: ${issueKey}`);
         return true;
@@ -354,8 +431,9 @@ async function updateIssue(issueKey, fields) {
 /**
  * Fetch recent closed issues (equivalent of getInspectionTickets).
  * Returns last 10 issues with label sentinel:failed or recently closed.
+ * @param {string} [token]
  */
-async function getInspectionTickets() {
+async function getInspectionTickets(token = null) {
     if (!GITHUB_ISSUES_REPO) return [];
 
     try {
@@ -365,7 +443,10 @@ async function getInspectionTickets() {
 
         try {
             const failedIssues = await githubRequest(
-                `/repos/${GITHUB_ISSUES_REPO}/issues?state=all&labels=${failedLabel}&per_page=10&sort=updated&direction=desc`
+                `/repos/${GITHUB_ISSUES_REPO}/issues?state=all&labels=${failedLabel}&per_page=10&sort=updated&direction=desc`,
+                'GET',
+                null,
+                token
             );
             if (Array.isArray(failedIssues)) {
                 issues = failedIssues;
@@ -378,7 +459,10 @@ async function getInspectionTickets() {
         if (issues.length < 10) {
             try {
                 const closedIssues = await githubRequest(
-                    `/repos/${GITHUB_ISSUES_REPO}/issues?state=closed&per_page=10&sort=updated&direction=desc`
+                    `/repos/${GITHUB_ISSUES_REPO}/issues?state=closed&per_page=10&sort=updated&direction=desc`,
+                    'GET',
+                    null,
+                    token
                 );
                 if (Array.isArray(closedIssues)) {
                     // Merge, deduplicate by number
@@ -404,6 +488,10 @@ async function getInspectionTickets() {
 }
 
 module.exports = {
+    // Token management
+    setActiveIssueToken,
+
+    // Issue lifecycle
     getPendingTickets,
     transitionIssue,
     addComment,
@@ -413,5 +501,11 @@ module.exports = {
     getProjects,
     searchIssues,
     updateIssue,
-    getInspectionTickets
+    getInspectionTickets,
+
+    // Exported helpers (used by tests)
+    parseBodyDirective,
+    derivePriority,
+    mapIssue,
+    parseIssueNumber
 };

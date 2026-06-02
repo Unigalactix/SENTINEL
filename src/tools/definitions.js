@@ -1,6 +1,6 @@
 const { z } = require('zod');
 const { generateWorkflowFile, getPullRequestChecks, deleteBranch, markPullRequestReadyForReview, mergePullRequest } = require('../services/githubService');
-const { addComment, getIssueDetails } = require('../services/jiraService');
+const { addComment, getIssueDetails } = require('../services/githubIssueService');
 const fs = require('fs');
 const path = require('path');
 
@@ -40,10 +40,10 @@ const tools = [
         }
     },
     {
-        name: "add_jira_comment",
-        description: "Post a comment to a Jira ticket.",
+        name: "add_issue_comment",
+        description: "Post a comment to a GitHub Issue tracked by Sentinel.",
         schema: z.object({
-            issueKey: z.string().describe("The Jira Issue Key (e.g., PROJ-123)"),
+            issueKey: z.string().describe("The Sentinel Issue Key (e.g., GH-123)"),
             commentBody: z.string().describe("The text content of the comment")
         }),
         handler: async ({ issueKey, commentBody }) => {
@@ -118,10 +118,10 @@ const tools = [
         }
     },
     {
-        name: "get_jira_details",
-        description: "Read the full details of a specific Jira ticket.",
+        name: "get_issue_details",
+        description: "Read the full details of a specific GitHub Issue tracked by Sentinel.",
         schema: z.object({
-            issueKey: z.string().describe("The Jira Issue Key (e.g., NDE-123)")
+            issueKey: z.string().describe("The Sentinel Issue Key (e.g., GH-123)")
         }),
         handler: async ({ issueKey }) => {
             const details = await getIssueDetails(issueKey);
@@ -155,7 +155,7 @@ const tools = [
     },
     {
         name: "trigger_manual_poll",
-        description: "Force the Sentinel to check Jira for new tickets immediately.",
+        description: "Force the Sentinel to check GitHub Issues for new tickets immediately.",
         schema: z.object({}),
         handler: async () => {
             try {
@@ -171,7 +171,7 @@ const tools = [
     },
     {
         name: "list_active_repos",
-        description: "List all Jira projects currently being monitored by the Sentinel.",
+        description: "List all GitHub repositories currently being monitored by the Sentinel.",
         schema: z.object({}),
         handler: async () => {
             try {

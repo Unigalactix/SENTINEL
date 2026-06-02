@@ -32,7 +32,7 @@ const {
     checkCopilotStatus    // [NEW]
 } = require('./src/services/githubService');
 const githubService = require('./src/services/githubService');
-const { getPendingTickets, transitionIssue, addComment, getIssueDetails, getInspectionTickets, createIssue } = require('./src/services/githubIssueService');
+const { getPendingTickets, transitionIssue, addComment, getIssueDetails, getInspectionTickets, createIssue, setActiveIssueToken } = require('./src/services/githubIssueService');
 const llmService = require('./src/services/llmService'); // [NEW]
 require('dotenv').config();
 
@@ -50,9 +50,13 @@ try {
 }
 
 function getPostPrStatusForIssue(issue) {
-    const projectKey = issue && issue.key ? issue.key.split('-')[0] : null;
-    const projectName = issue?.fields?.project?.name;
-    const keys = [projectKey, projectName].filter(Boolean);
+    // Sentinel keys are always "GH-<number>" so a per-project mapping is not meaningful here.
+    // Allow operators to override the post-PR status per repo via the
+    // optional config file (config/board_post_pr_status.json), keyed by
+    // the issue.fields.repo value or by the GITHUB_ISSUES_REPO env var.
+    const repoFromIssue = issue?.fields?.repo;
+    const repoFromEnv = process.env.GITHUB_ISSUES_REPO;
+    const keys = [repoFromIssue, repoFromEnv].filter(Boolean);
     for (const k of keys) {
         if (boardPostPrStatus && Object.prototype.hasOwnProperty.call(boardPostPrStatus, k)) {
             return boardPostPrStatus[k];
@@ -64,7 +68,7 @@ function getPostPrStatusForIssue(issue) {
 const app = express();
 const PORT = process.env.PORT || 3000;
 const USE_GH_COPILOT = process.env.USE_GH_COPILOT === 'true';
-const { execFile } = require('child_process');
+const { execFile, spawn } = require('child_process');
 
 // In-memory store for UI
 let systemStatus = {
@@ -178,6 +182,68 @@ if (!fs.existsSync(LOG_DIR)) {
     fs.mkdirSync(LOG_DIR);
 }
 
+// --- State persistence (Fix #13) -----------------------------------------
+// Survive a restart so `monitoredTickets`, `scanHistory`, and `paused` aren't
+// silently dropped while jobs are in flight. We persist a small JSON document
+// next to the log file with a short debounce.
+const STATE_FILE = path.join(LOG_DIR, 'sentinel-state.json');
+let _stateSaveTimer = null;
+
+function loadPersistedState() {
+    try {
+        if (!fs.existsSync(STATE_FILE)) return;
+        const raw = fs.readFileSync(STATE_FILE, 'utf8');
+        if (!raw) return;
+        const data = JSON.parse(raw);
+        if (Array.isArray(data.monitoredTickets)) {
+            systemStatus.monitoredTickets = data.monitoredTickets;
+        }
+        if (Array.isArray(data.scanHistory)) {
+            systemStatus.scanHistory = data.scanHistory;
+        }
+        if (typeof data.paused === 'boolean') {
+            systemStatus.paused = data.paused;
+        }
+        if (typeof data.processedCount === 'number') {
+            systemStatus.processedCount = data.processedCount;
+        }
+        console.log(`[State] Restored ${systemStatus.monitoredTickets.length} monitored / ${systemStatus.scanHistory.length} history entries from ${STATE_FILE}`);
+    } catch (e) {
+        console.warn('[State] Failed to load persisted state:', e.message);
+    }
+}
+
+function persistStateNow() {
+    try {
+        const snapshot = {
+            monitoredTickets: systemStatus.monitoredTickets || [],
+            scanHistory: (systemStatus.scanHistory || []).slice(0, 100), // cap to last 100
+            paused: !!systemStatus.paused,
+            processedCount: systemStatus.processedCount || 0,
+            savedAt: new Date().toISOString()
+        };
+        fs.writeFileSync(STATE_FILE, JSON.stringify(snapshot, null, 2), 'utf8');
+    } catch (e) {
+        console.warn('[State] Failed to persist state:', e.message);
+    }
+}
+
+function schedulePersistState() {
+    // Debounce — collapse rapid mutations into one disk write.
+    if (_stateSaveTimer) return;
+    _stateSaveTimer = setTimeout(() => {
+        _stateSaveTimer = null;
+        persistStateNow();
+    }, 1500);
+}
+
+// Persist on shutdown so in-flight state survives a normal restart.
+process.on('SIGINT', () => { persistStateNow(); process.exit(0); });
+process.on('SIGTERM', () => { persistStateNow(); process.exit(0); });
+
+// Also flush periodically as a safety net for crashes.
+setInterval(persistStateNow, 30_000).unref();
+
 function writeLog(message) {
     const logFile = path.join(LOG_DIR, 'server.log');
     const timestamp = new Date().toISOString();
@@ -205,13 +271,20 @@ const session = require('express-session');
 const authService = require('./src/services/authService');
 
 app.use(express.json());
+// Trust the first proxy hop (Heroku, Azure App Service, NGINX, etc.) so the
+// secure cookie flag works correctly when terminating TLS upstream.
+if (process.env.NODE_ENV === 'production') {
+    app.set('trust proxy', 1);
+}
 app.use(session({
     secret: process.env.SESSION_SECRET || 'sentinel-dev-secret-change-in-prod',
     resave: false,
     saveUninitialized: false,
     cookie: {
-        secure: false, // Set to true in production with HTTPS
+        // Honor a trusted reverse proxy in production (req.secure works after app.set('trust proxy'))
+        secure: process.env.NODE_ENV === 'production',
         httpOnly: true,
+        sameSite: 'lax',
         maxAge: 24 * 60 * 60 * 1000 // 24 hours
     }
 }));
@@ -257,6 +330,7 @@ async function getFreshSessionAccessToken(req) {
             systemStatus.activeUserRefreshToken = refreshed.refreshToken || refreshToken;
             systemStatus.activeUserTokenExpiresAt = newExpiresAt;
             setActiveToken(refreshed.accessToken);
+            setActiveIssueToken(refreshed.accessToken);
         }
 
         console.log('[Auth] Access token refreshed successfully for current session');
@@ -293,6 +367,7 @@ async function ensureGlobalAccessTokenFresh() {
         systemStatus.activeUserRefreshToken = refreshed.refreshToken || refreshToken;
         systemStatus.activeUserTokenExpiresAt = newExpiresAt;
         setActiveToken(refreshed.accessToken);
+        setActiveIssueToken(refreshed.accessToken);
 
         console.log('[Auth] Global access token refreshed successfully');
     } catch (e) {
@@ -388,6 +463,7 @@ app.get('/api/auth/callback', async (req, res) => {
 
         // Set active token in githubService for all API calls
         setActiveToken(tokenData.accessToken);
+        setActiveIssueToken(tokenData.accessToken);
 
         // [NEW] Check if the user has installed the GitHub App
         const isInstalled = await checkAppInstallation(tokenData.accessToken);
@@ -446,6 +522,7 @@ app.post('/api/auth/logout', (req, res) => {
             // Clear active token in githubService
             clearUserToken();
             setActiveToken(null);
+            setActiveIssueToken(null);
 
             console.log(`[Auth] User ${userLogin} logged out - agent removed`);
             res.json({ message: 'Logged out successfully' });
@@ -630,6 +707,7 @@ app.post('/api/pause', (req, res) => {
     systemStatus.paused = paused;
     console.log(`[API] System ${paused ? 'PAUSED' : 'RESUMED'}`);
     logProgress(`System ${paused ? 'PAUSED' : 'RESUMED'} by user.`);
+    schedulePersistState();
     res.json({ message: `System ${paused ? 'paused' : 'resumed'}`, paused: systemStatus.paused });
 });
 
@@ -843,7 +921,7 @@ app.post('/api/tickets', async (req, res) => {
         });
 
         const issueRepo = process.env.GITHUB_ISSUES_REPO || repoName;
-        const url = `https://github.com/${issueRepo}/issues/${issue.id}`;
+        const url = `https://github.com/${issueRepo}/issues/${issue.number}`;
 
         logProgress(`Created GitHub Issue from UI: ${issue.key} for repo ${repoName}`);
 
@@ -886,49 +964,14 @@ async function processTicketData(issue) {
 
     const ticketData = issue.fields;
 
-    // --- Helper: Parse Jira ADF to Markdown ---
-    function parseJiraADF(node) {
-        if (!node) return '';
-        if (typeof node === 'string') return node;
+    // GitHub Issue bodies are plain markdown strings, so just guarantee a string.
+    ticketData.description = (typeof ticketData.description === 'string') ? ticketData.description : '';
 
-        if (node.type === 'text') return node.text;
-
-        if (node.content) {
-            return node.content.map(child => {
-                let text = parseJiraADF(child);
-                if (child.type === 'paragraph') return text + '\n\n';
-                if (child.type === 'hardBreak') return '\n';
-                if (child.type === 'listItem') {
-                    // remove extra newlines from paragraph inside list item
-                    return '- ' + text.trim() + '\n';
-                }
-                return text;
-            }).join('');
-        }
-        return '';
-    }
-
-    // Normalize Description (Jira Cloud uses ADF objects)
-    if (ticketData.description) {
-        if (typeof ticketData.description === 'string') {
-            // Already string
-        } else {
-            // It's an ADF object, parse it
-            ticketData.description = parseJiraADF(ticketData.description);
-        }
-    } else {
-        ticketData.description = '';
-    }
-
-    // Determine Project Key from Issue Key (e.g. NDE-123 -> NDE)
-    const projectKey = issueKey.split('-')[0];
-
-    // Dynamic Default Repo Lookup
-    const defaultRepoEnvVar = `DEFAULT_REPO_${projectKey}`;
-    const projectDefaultRepo = process.env[defaultRepoEnvVar];
-
-    // Debug: Log repo lookup attempts
-    console.log(`[Repo Lookup] ProjectKey: ${projectKey}, EnvVar: ${defaultRepoEnvVar}, Value: ${projectDefaultRepo}`);
+    // Sentinel keys are always "GH-<number>". Default-repo lookup is no longer
+    // keyed by project — operators should set DEFAULT_REPO in their env, or
+    // include `**repo:** owner/name` in the issue body.
+    const projectDefaultRepo = process.env.DEFAULT_REPO;
+    console.log(`[Repo Lookup] Default repo from env: ${projectDefaultRepo || '(none)'}`);
 
     // Resolve repo from fields, then description/summary, then env default
     function extractOwnerRepo(txt) {
@@ -937,17 +980,29 @@ async function processTicketData(issue) {
         return m ? `${m[1]}/${m[2]}` : null;
     }
 
-    const fieldRepo = (ticketData.customfield_repo || ticketData.repoName || '').trim();
+    const fieldRepo = (ticketData.repo || ticketData.repoName || '').trim();
     const descRepo = extractOwnerRepo(ticketData.description) || extractOwnerRepo(ticketData.summary);
-    const repoName = fieldRepo || descRepo || projectDefaultRepo || 'Unigalactix/sample-node-project';
+    const repoName = fieldRepo || descRepo || projectDefaultRepo;
+
+    if (!repoName) {
+        const msg = `No target repository could be resolved for ${issueKey}. Set the issue body to include "**repo:** owner/name" or define the DEFAULT_REPO env var.`;
+        logProgress(msg);
+        try {
+            await addComment(issueKey, `❌ ${msg}`);
+            await transitionIssue(issueKey, 'To Do');
+        } catch (_) { /* ignore */ }
+        systemStatus.activeTickets = systemStatus.activeTickets.filter(t => t.key !== issueKey);
+        return;
+    }
 
     // Pre-validate repo access and cache default branch
     let resolvedDefaultBranch = null;
 
     // Enforce allowed orgs scope
-    // [UPDATED] User Permission Filtering
-    // Only process tickets if the logged-in user has push access (owner or collaborator)
-    const activeToken = systemStatus.activeUserToken;
+    // Use the active agent's OAuth token; fall back to the (deprecated) global token
+    // for backwards compatibility with single-user installs.
+    const primaryAgent = getFirstAgent();
+    const activeToken = primaryAgent?.token || systemStatus.activeUserToken;
     if (!activeToken) {
         logProgress(`Skipping ticket ${issueKey || 'unknown'} - No active user logged in.`);
         return;
@@ -1135,13 +1190,37 @@ async function processTicketData(issue) {
             }
 
             const ghOutput = await new Promise((resolve) => {
-                execFile('gh', args, { cwd: process.cwd(), env }, (error, stdout, stderr) => {
-                    if (error) {
-                        logProgress(`Copilot CLI failed: ${error.message}. Falling back.`);
+                const child = spawn('gh', args, { cwd: process.cwd(), env });
+                let stdout = '';
+                let stderr = '';
+                let settled = false;
+                const timer = setTimeout(() => {
+                    if (!settled) {
+                        settled = true;
+                        try { child.kill('SIGTERM'); } catch (_) { /* ignore */ }
+                        logProgress(`Copilot CLI timed out after 30s. Falling back.`);
+                        resolve(null);
+                    }
+                }, 30_000);
+
+                child.stdout.on('data', (d) => { stdout += d.toString(); });
+                child.stderr.on('data', (d) => { stderr += d.toString(); });
+                child.on('error', (error) => {
+                    if (settled) return;
+                    settled = true;
+                    clearTimeout(timer);
+                    logProgress(`Copilot CLI failed to spawn: ${error.message}. Falling back.`);
+                    resolve(null);
+                });
+                child.on('close', (code) => {
+                    if (settled) return;
+                    settled = true;
+                    clearTimeout(timer);
+                    if (code !== 0) {
+                        logProgress(`Copilot CLI exited with code ${code}. stderr: ${stderr.slice(0, 200)}. Falling back.`);
                         resolve(null);
                         return;
                     }
-                    // Basic parse: use stdout as proposed file content
                     if (stdout && stdout.trim().length > 0) {
                         resolve(stdout);
                     } else {
@@ -1149,6 +1228,12 @@ async function processTicketData(issue) {
                         resolve(null);
                     }
                 });
+
+                // Actually feed our prompt to the CLI — previously this was dropped.
+                try {
+                    child.stdin.write(message);
+                    child.stdin.end();
+                } catch (_) { /* if write fails the close handler will fire */ }
             });
 
             if (ghOutput) {
@@ -1234,6 +1319,7 @@ async function processTicketData(issue) {
             headSha: result.headSha,
             copilotPrUrl: null,
             copilotMerged: false,
+            copilotApproved: false,
             copilotCreatedAt: null, // [NEW]
             copilotMergedAt: null,   // [NEW]
             toolUsed: null,          // [NEW]
@@ -1244,6 +1330,7 @@ async function processTicketData(issue) {
         systemStatus.scanHistory.unshift(historyItem);
         // Add to monitored list
         systemStatus.monitoredTickets.push(historyItem);
+        schedulePersistState();
 
     } catch (error) {
         logProgress(`ERROR: ${error.message} `);
@@ -1254,6 +1341,7 @@ async function processTicketData(issue) {
             await transitionIssue(issueKey, 'To Do');
         }
         systemStatus.scanHistory.unshift({ key: issueKey, priority, result: 'Failed', time: new Date().toLocaleTimeString() });
+        schedulePersistState();
     } finally {
         // Clear active state after a short delay so user can see 'Done' state if watching closely? 
         // Or immediately clear. Let's clear immediately but logs persist until next ticket?
@@ -1270,12 +1358,41 @@ async function applyCopilotFixes({ files = [], prompt = '' }) {
     const results = [];
     for (const f of files) {
         await new Promise((resolve) => {
-            // Basic suggest only; flags like --filename/--message are unsupported
+            // Basic suggest only; flags like --filename/--message are unsupported,
+            // so we pipe the prompt (with the target filename baked in) through stdin.
             const args = ['copilot', 'suggest'];
-            execFile('gh', args, { cwd: process.cwd() }, (error, stdout, stderr) => {
-                results.push({ file: f, ok: !error, stdout, stderr, error: error ? error.message : null });
+            const child = spawn('gh', args, { cwd: process.cwd() });
+            let stdout = '';
+            let stderr = '';
+            let settled = false;
+            const timer = setTimeout(() => {
+                if (!settled) {
+                    settled = true;
+                    try { child.kill('SIGTERM'); } catch (_) { /* ignore */ }
+                    results.push({ file: f, ok: false, stdout, stderr, error: 'Copilot CLI timed out' });
+                    resolve();
+                }
+            }, 30_000);
+            child.stdout.on('data', (d) => { stdout += d.toString(); });
+            child.stderr.on('data', (d) => { stderr += d.toString(); });
+            child.on('error', (error) => {
+                if (settled) return;
+                settled = true;
+                clearTimeout(timer);
+                results.push({ file: f, ok: false, stdout, stderr, error: error.message });
                 resolve();
             });
+            child.on('close', (code) => {
+                if (settled) return;
+                settled = true;
+                clearTimeout(timer);
+                results.push({ file: f, ok: code === 0, stdout, stderr, error: code === 0 ? null : `exit ${code}` });
+                resolve();
+            });
+            try {
+                child.stdin.write(`File: ${f}\n\n${prompt}`);
+                child.stdin.end();
+            } catch (_) { /* handled by close */ }
         });
     }
     return results;
@@ -1327,6 +1444,7 @@ async function startPolling() {
                         headSha: pr.headSha,
                         copilotPrUrl: null,
                         copilotMerged: false,
+                        copilotApproved: false,
                         copilotCreatedAt: null,
                         copilotMergedAt: null,
                         toolUsed: 'Reconcile',
@@ -1336,6 +1454,7 @@ async function startPolling() {
                     };
                     systemStatus.scanHistory.unshift(historyItem);
                     systemStatus.monitoredTickets.push(historyItem);
+                    schedulePersistState();
                     writeLog(`[Sentinel] Resumed monitoring PR ${pr.prUrl} for issue ${issueKey}.`);
                     try {
                         await addComment(issueKey, `🔁 Server restarted: resuming monitoring for active PR\nPR: ${pr.prUrl}`);
@@ -1378,6 +1497,7 @@ async function startPolling() {
                 systemStatus.activeUserToken = agent.token;
                 systemStatus.activeUser = agent.user;
                 setActiveToken(agent.token);
+                setActiveIssueToken(agent.token);
                 writeLog(`[Poll] Using token from agent ${agent.user.login}`);
             }
 
@@ -1466,32 +1586,42 @@ async function startPolling() {
                                         ticket.toolUsed = "Autopilot"; // [NEW] Track tool usage
                                     }
 
-                                    // [NEW] Auto-Approve the PR
-                                    writeLog(`[Sentinel] Auto-approving SubPR #${subPr.number}...`);
-                                    await approvePullRequest({ repoName: ticket.repoName, pullNumber: subPr.number });
+                                    // [FIX #14] Only auto-approve / enable auto-merge once per sub PR.
+                                    if (!ticket.copilotApproved) {
+                                        writeLog(`[Sentinel] Auto-approving SubPR #${subPr.number}...`);
+                                        await approvePullRequest({ repoName: ticket.repoName, pullNumber: subPr.number });
+                                        ticket.copilotApproved = true;
 
-                                    // Enable GitHub Auto-Merge on the sub PR
-                                    const autoRes = await enablePullRequestAutoMerge({ repoName: ticket.repoName, pullNumber: subPr.number, mergeMethod: 'SQUASH' });
-                                    if (autoRes.ok) {
-                                        ticket.autoMergeEnabled = true;
-                                        logProgress(`Auto-merge enabled for Copilot SubPR #${subPr.number} on ${ticket.key}.`);
-                                        await addComment(ticket.key, `🤖 **Copilot Update**: Auto-merge has been enabled for the sub-PR #${subPr.number}.\n\nIt will merge once all required checks pass.`);
-                                        // Opportunistic check: mark merged flag if already merged
+                                        // Enable GitHub Auto-Merge on the sub PR
+                                        const autoRes = await enablePullRequestAutoMerge({ repoName: ticket.repoName, pullNumber: subPr.number, mergeMethod: 'SQUASH' });
+                                        if (autoRes.ok) {
+                                            ticket.autoMergeEnabled = true;
+                                            logProgress(`Auto-merge enabled for Copilot SubPR #${subPr.number} on ${ticket.key}.`);
+                                            await addComment(ticket.key, `🤖 **Copilot Update**: Auto-merge has been enabled for the sub-PR #${subPr.number}.\n\nIt will merge once all required checks pass.`);
+                                            // Opportunistic check: mark merged flag if already merged
+                                            const mergedCheck = await isPullRequestMerged({ repoName: ticket.repoName, pullNumber: subPr.number });
+                                            if (mergedCheck.merged) {
+                                                ticket.copilotMerged = true;
+                                                ticket.copilotMergedAt = new Date().toISOString();
+                                            }
+                                        } else {
+                                            writeLog(`[Sentinel] ⚠️ Auto-merge enable failed for SubPR #${subPr.number}: ${autoRes.message}`);
+
+                                            // Fallback: If Auto-Merge fails (e.g. "clean status" which implies ready, or not protected), try immediate merge
+                                            writeLog(`[Sentinel] Attempting immediate merge for SubPR #${subPr.number} as fallback...`);
+                                            const mergeRes = await mergePullRequest({ repoName: ticket.repoName, pullNumber: subPr.number, method: 'squash' });
+                                            if (mergeRes.merged) {
+                                                ticket.copilotMerged = true;
+                                                ticket.copilotMergedAt = new Date().toISOString();
+                                                await addComment(ticket.key, `🤖 **Copilot Update**: Merged sub-PR #${subPr.number} (Fallback Immediate Merge).`);
+                                            }
+                                        }
+                                    } else if (ticket.autoMergeEnabled && !ticket.copilotMerged) {
+                                        // Poll merged-state cheaply without re-approving / re-enabling auto-merge
                                         const mergedCheck = await isPullRequestMerged({ repoName: ticket.repoName, pullNumber: subPr.number });
                                         if (mergedCheck.merged) {
                                             ticket.copilotMerged = true;
                                             ticket.copilotMergedAt = new Date().toISOString();
-                                        }
-                                    } else {
-                                        writeLog(`[Sentinel] ⚠️ Auto-merge enable failed for SubPR #${subPr.number}: ${autoRes.message}`);
-
-                                        // Fallback: If Auto-Merge fails (e.g. "clean status" which implies ready, or not protected), try immediate merge
-                                        writeLog(`[Sentinel] Attempting immediate merge for SubPR #${subPr.number} as fallback...`);
-                                        const mergeRes = await mergePullRequest({ repoName: ticket.repoName, pullNumber: subPr.number, method: 'squash' });
-                                        if (mergeRes.merged) {
-                                            ticket.copilotMerged = true;
-                                            ticket.copilotMergedAt = new Date().toISOString();
-                                            await addComment(ticket.key, `🤖 **Copilot Update**: Merged sub-PR #${subPr.number} (Fallback Immediate Merge).`);
                                         }
                                     }
                                 }
@@ -1529,6 +1659,9 @@ async function startPolling() {
 
 app.listen(PORT, async () => {
     writeLog(`Server running on port ${PORT}`);
+
+    // Restore persisted ticket / history state before any background work starts.
+    loadPersistedState();
 
     // Verify Env
     const ghToken = process.env.GHUB_TOKEN;

@@ -33,7 +33,7 @@ describe('Service Exports', () => {
             'getJobsForRun',
             'summarizeFailureFromRun',
             'getLatestDeploymentUrl',
-            'getActiveOrgPRsWithJiraKeys',
+            'getActiveOrgPRsWithGHKeys',
             'getRepoRootFiles',
             'getRepoFileContent',
             'getRepoDirectoryFiles',
@@ -52,30 +52,11 @@ describe('Service Exports', () => {
         });
     });
 
-    describe('jiraService', () => {
-        const jiraService = require('../src/services/jiraService');
-
-        const expectedExports = [
-            'getPendingTickets',
-            'transitionIssue',
-            'addComment',
-            'getIssueDetails',
-            'createIssue',
-            'getProjects',
-            'searchIssues',
-            'updateIssue'
-        ];
-
-        test.each(expectedExports)('%s is exported and is a function', (fnName) => {
-            expect(jiraService[fnName]).toBeDefined();
-            expect(typeof jiraService[fnName]).toBe('function');
-        });
-    });
-
     describe('githubIssueService', () => {
         const githubIssueService = require('../src/services/githubIssueService');
 
         const expectedExports = [
+            'setActiveIssueToken',
             'getPendingTickets',
             'transitionIssue',
             'addComment',
@@ -85,7 +66,11 @@ describe('Service Exports', () => {
             'getProjects',
             'searchIssues',
             'updateIssue',
-            'getInspectionTickets'
+            'getInspectionTickets',
+            'parseBodyDirective',
+            'derivePriority',
+            'mapIssue',
+            'parseIssueNumber'
         ];
 
         test.each(expectedExports)('%s is exported and is a function', (fnName) => {

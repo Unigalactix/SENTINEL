@@ -11,42 +11,43 @@
         rel="stylesheet">
     <style>
         :root {
-            /* --- Light Minimal Premium Palette --- */
-            --bg-base: #f8fafc;
+            /* --- Sentinel Design Tokens (refreshed) --- */
+            /* Surfaces */
+            --bg-base: #f7f8fb;
             --bg-surface: #ffffff;
-            --bg-subtle: #f1f5f9;
-            --bg-muted: #e2e8f0;
+            --bg-subtle: #f1f3f8;
+            --bg-muted: #e5e8ef;
 
-            /* Borders & Shadows */
-            --border: #e2e8f0;
-            --border-strong: #cbd5e1;
-            --shadow-xs: 0 1px 2px rgba(15, 23, 42, 0.05);
-            --shadow-sm: 0 2px 4px rgba(15, 23, 42, 0.07), 0 1px 2px rgba(15, 23, 42, 0.04);
-            --shadow: 0 4px 12px rgba(15, 23, 42, 0.09), 0 2px 4px rgba(15, 23, 42, 0.04);
-            --shadow-lg: 0 12px 32px rgba(15, 23, 42, 0.11), 0 4px 8px rgba(15, 23, 42, 0.06);
-            --shadow-xl: 0 20px 60px rgba(15, 23, 42, 0.13), 0 8px 20px rgba(15, 23, 42, 0.07);
+            /* Borders & Shadows (softer, more depth) */
+            --border: #e6e9f0;
+            --border-strong: #c9cfdb;
+            --shadow-xs: 0 1px 2px rgba(15, 23, 42, 0.04);
+            --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.04), 0 2px 6px rgba(15, 23, 42, 0.05);
+            --shadow: 0 2px 6px rgba(15, 23, 42, 0.05), 0 8px 24px rgba(15, 23, 42, 0.06);
+            --shadow-lg: 0 8px 20px rgba(15, 23, 42, 0.08), 0 20px 48px rgba(15, 23, 42, 0.08);
+            --shadow-xl: 0 12px 28px rgba(15, 23, 42, 0.10), 0 28px 72px rgba(15, 23, 42, 0.10);
 
             /* Text Colors */
-            --text-main: #0f172a;
+            --text-main: #0b1220;
             --text-muted: #475569;
             --text-dim: #94a3b8;
 
-            /* Accent Colors */
-            --primary: #3b82f6;
-            --primary-light: #eff6ff;
-            --primary-border: #bfdbfe;
+            /* Accent Colors (slightly cooler indigo-leaning primary) */
+            --primary: #2563eb;
+            --primary-light: #eff4ff;
+            --primary-border: #bfd3fb;
             --primary-dark: #1d4ed8;
-            --primary-glow: rgba(59, 130, 246, 0.15);
-            --success: #059669;
+            --primary-glow: rgba(37, 99, 235, 0.14);
+            --success: #047857;
             --success-light: #ecfdf5;
             --success-border: #a7f3d0;
-            --warning: #d97706;
+            --warning: #b45309;
             --warning-light: #fffbeb;
             --warning-border: #fde68a;
-            --danger: #dc2626;
+            --danger: #b91c1c;
             --danger-light: #fef2f2;
             --danger-border: #fecaca;
-            --purple: #7c3aed;
+            --purple: #6d28d9;
             --purple-light: #f5f3ff;
             --purple-border: #ddd6fe;
         }
@@ -63,6 +64,11 @@
             display: flex;
             flex-direction: column;
             overflow-x: hidden;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+            font-feature-settings: 'cv11', 'ss01', 'ss03';
+            font-variant-numeric: tabular-nums;
+            letter-spacing: -0.005em;
         }
 
         /* --- Subtle Ambient Background --- */
@@ -71,16 +77,16 @@
             top: 0; left: 0;
             width: 100vw; height: 100vh;
             background:
-                radial-gradient(ellipse at 10% 15%, rgba(59, 130, 246, 0.05) 0%, transparent 50%),
-                radial-gradient(ellipse at 90% 85%, rgba(124, 58, 237, 0.04) 0%, transparent 50%);
+                radial-gradient(ellipse at 12% 10%, rgba(37, 99, 235, 0.045) 0%, transparent 55%),
+                radial-gradient(ellipse at 88% 90%, rgba(109, 40, 217, 0.035) 0%, transparent 55%);
             z-index: -1;
             pointer-events: none;
         }
 
         /* --- Global Scrollbar --- */
-        ::-webkit-scrollbar { width: 6px; height: 6px; }
-        ::-webkit-scrollbar-track { background: var(--bg-subtle); border-radius: 3px; }
-        ::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 3px; }
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 8px; border: 2px solid var(--bg-base); }
         ::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
 
         /* ============================================================

@@ -85,8 +85,8 @@ class LLMService {
     }
 
     /**
-     * Plans a fix strategy based on the Jira ticket and Repo Summary.
-     * @param {object} ticketData - Jira ticket fields (summary, description)
+     * Plans a fix strategy based on the GitHub Issue and Repo Summary.
+     * @param {object} ticketData - Issue fields (summary, description)
      * @param {string} repoSummary - The repo summary
      * @returns {Promise<string>}
      */
@@ -122,7 +122,7 @@ class LLMService {
     }
 
     /**
-     * Generates a detailed DevOps Audit Report for a Jira Ticket.
+     * Generates a detailed DevOps Audit Report for a GitHub Issue.
      * @param {string} repoName
      * @param {string} readme
      * @param {Array} findings
@@ -146,7 +146,7 @@ class LLMService {
     ${JSON.stringify(findings, null, 2)}
 
     Task:
-    Generate a professional, markdown-formatted Jira Ticket Description.
+    Generate a professional, markdown-formatted Issue Description suitable for a GitHub Issue body.
     
     Structure the report as follows:
     # DevOps Audit Report: ${repoName}

@@ -42,21 +42,7 @@ flowchart LR
 
 ## Screenshots
 
-> UI references – capture your own screenshots and save them under `docs/ui/` using the filenames below.
-
-- **Dashboard Overview**  
-    ![Sentinel Dashboard](docs/ui/dashboard-overview.png)
-
-- **Login & Install Flow**  
-    ![GitHub Login & App Install](docs/ui/login-install-flow.png)
-
-- **Ticket Processing & Logs**  
-    ![Real-time Ticket Logs](docs/ui/ticket-processing-logs.png)
-
-- **Sidebar Status Panel**  
-    ![Connection & Agent Status](docs/ui/sidebar-status-panel.png)
-
-These images are not committed by default; when updating the UI, also refresh the corresponding screenshot in `docs/ui/` so new users can see the latest experience.
+_Screenshots will be added as the UI stabilizes. To preview the dashboard locally, start the server and open <http://localhost:3000>._
 
 ---
 
@@ -140,7 +126,7 @@ GHUB_ORG=YourOrg                       # GitHub organization for PR reconciliati
 # AI (Optional — enables agentic analysis)
 LLM_API_KEY=your_azure_openai_key
 LLM_ENDPOINT=https://your-resource.openai.azure.com
-LLM_DEPLOYEMENT_NAME=gpt-4o
+LLM_DEPLOYMENT_NAME=gpt-4o
 USE_GH_COPILOT=true
 
 # Session
