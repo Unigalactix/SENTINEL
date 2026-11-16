@@ -10,8 +10,29 @@ env:
   IMAGE_NAME: sentinel
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm test
+
   build-and-push:
     runs-on: ubuntu-latest
+    needs: test
     steps:
       - uses: actions/checkout@v4
 
@@ -33,6 +54,15 @@ jobs:
     runs-on: ubuntu-latest
     needs: build-and-push
     steps:
+      - name: Validate required configuration
+        env:
+          REPO_SECRET: ${{ secrets.GITHUB_ISSUES_REPO }}
+        run: |
+          if [ -z "$REPO_SECRET" ]; then
+            echo "::error::GITHUB_ISSUES_REPO secret is empty — the deployed scanner would have no issues repo."
+            exit 1
+          fi
+
       - name: Deploy to Azure Web App
         uses: azure/webapps-deploy@v3
         with:
@@ -41,9 +71,11 @@ jobs:
           images: ${{ secrets.ACR_LOGIN_SERVER }}/sentinel:${{ github.sha }}
           app-settings-json: |
             [
+              {"name": "NODE_ENV", "value": "production"},
               {"name": "OAUTH_CLIENT_ID", "value": "${{ secrets.OAUTH_CLIENT_ID }}"},
               {"name": "OAUTH_CLIENT_SECRET", "value": "${{ secrets.OAUTH_CLIENT_SECRET }}"},
               {"name": "SESSION_SECRET", "value": "${{ secrets.SESSION_SECRET }}"},
+              {"name": "SENTINEL_INTERNAL_TOKEN", "value": "${{ secrets.SENTINEL_INTERNAL_TOKEN }}"},
               {"name": "GITHUB_ISSUES_REPO", "value": "${{ secrets.GITHUB_ISSUES_REPO }}"},
               {"name": "GITHUB_ISSUES_LABEL", "value": "${{ secrets.GITHUB_ISSUES_LABEL }}"},
               {"name": "LLM_API_KEY", "value": "${{ secrets.LLM_API_KEY }}"},
@@ -56,4 +88,4 @@ jobs:
           echo "### 🚀 Deployed successfully!" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**App URL:** https://sentineldevagent.azurewebsites.net" >> $GITHUB_STEP_SUMMARY
-          echo "**Image:** \`${{ secrets.ACR_LOGIN_SERVER }}/sentinel:${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Image:** `${{ secrets.ACR_LOGIN_SERVER }}/sentinel:${{ github.sha }}`" >> $GITHUB_STEP_SUMMARY
