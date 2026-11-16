@@ -1,7 +1,7 @@
 {
   "name": "sentinel",
-  "version": "1.0.0",
-  "description": "Sentinel: Autonomous DevOps Agent for Jira and GitHub Automation",
+  "version": "3.1.0",
+  "description": "Autonomous DevOps Agent for GitHub Issues and GitHub PR automation",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -21,7 +21,8 @@
     "express": "^4.18.2",
     "express-session": "^1.19.0",
     "openai": "^4.28.0",
-    "zod": "^3.23.8"
+    "zod": "^3.23.8",
+    "zod-to-json-schema": "^3.25.0"
   },
   "devDependencies": {
     "eslint": "^8.57.1",

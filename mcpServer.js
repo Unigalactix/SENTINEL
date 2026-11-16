@@ -1,4 +1,4 @@
-const { McpServer, ResourceTemplate } = require('@modelcontextprotocol/sdk/server/mcp.js');
+const { McpServer } = require('@modelcontextprotocol/sdk/server/mcp.js');
 const { StdioServerTransport } = require('@modelcontextprotocol/sdk/server/stdio.js');
 const { z } = require('zod');
 const { generateWorkflowFile, getPullRequestChecks } = require('./src/services/githubService');
@@ -7,8 +7,18 @@ const { addComment } = require('./src/services/githubIssueService');
 // Create the MCP Server
 const server = new McpServer({
     name: "Sentinel MCP",
-    version: "1.0.0"
+    version: "3.1.0"
 });
+
+// Destructive tools (merge_pr, delete_branch) are opt-in only: their handlers
+// refuse to run unless the operator explicitly sets
+// SENTINEL_ALLOW_DESTRUCTIVE=true.
+function destructiveRefusal(toolName) {
+    return {
+        isError: true,
+        content: [{ type: "text", text: `Error: Tool "${toolName}" is destructive and is disabled. Set SENTINEL_ALLOW_DESTRUCTIVE=true to enable it.` }]
+    };
+}
 
 const PORT = process.env.PORT || 3000;
 const API_BASE = process.env.API_BASE_URL || `http://localhost:${PORT}/api`;
@@ -107,6 +117,9 @@ server.tool(
         branchName: z.string().describe("Name of the branch to delete")
     },
     async ({ repoName, branchName }) => {
+        if (process.env.SENTINEL_ALLOW_DESTRUCTIVE !== 'true') {
+            return destructiveRefusal('delete_branch');
+        }
         const { deleteBranch } = require('./src/services/githubService');
         const result = await deleteBranch({ repoName, branchName });
         if (result.deleted) {
@@ -156,6 +169,9 @@ server.tool(
         method: z.enum(['merge', 'squash', 'rebase']).optional().describe("Merge method (default: squash)")
     },
     async ({ repoName, pullNumber, method }) => {
+        if (process.env.SENTINEL_ALLOW_DESTRUCTIVE !== 'true') {
+            return destructiveRefusal('merge_pr');
+        }
         const { mergePullRequest } = require('./src/services/githubService');
         const result = await mergePullRequest({ repoName, pullNumber, method: method || 'squash' });
         if (result.merged) {
@@ -222,7 +238,11 @@ server.tool(
     {},
     async () => {
         try {
-            const response = await fetch(`${API_BASE}/poll`, { method: 'POST' });
+            const headers = {};
+            if (process.env.SENTINEL_INTERNAL_TOKEN) {
+                headers['x-sentinel-internal-token'] = process.env.SENTINEL_INTERNAL_TOKEN;
+            }
+            const response = await fetch(`${API_BASE}/poll`, { method: 'POST', headers });
             const data = await response.json();
             return {
                 content: [{ type: "text", text: `Poll Triggered: ${data.message}` }]

@@ -1,40 +1,42 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const {
     generateWorkflowFile,
     createPullRequestForWorkflow,
-    getPullRequestChecks,
     detectRepoLanguage,
     getRepoInstructions,
     analyzeRepoStructure,
     getDefaultBranch,
     findCopilotSubPR,
-    mergeSubPRIntoBranch,
-    getPullRequestDetails,
-    hasExistingWorkflow,
-    triggerExistingWorkflow,
-    deleteBranch,
     markPullRequestReadyForReview,
-    mergePullRequest,
     enablePullRequestAutoMerge,
-    isPullRequestMerged,
     approvePullRequest,
     getActiveOrgPRsWithGHKeys,
     listRepoSecrets,
     // Per-user auth functions
     getOctokit,
-    setUserToken,
-    getUserToken,
-    clearUserToken,
-    setActiveToken,
     checkAppInstallation, // [NEW]
     checkCopilotStatus    // [NEW]
 } = require('./src/services/githubService');
 const githubService = require('./src/services/githubService');
-const { getPendingTickets, transitionIssue, addComment, getIssueDetails, getInspectionTickets, createIssue, setActiveIssueToken } = require('./src/services/githubIssueService');
+const { getPendingTickets, transitionIssue, addComment, getIssueDetails, getInspectionTickets, createIssue } = require('./src/services/githubIssueService');
 const llmService = require('./src/services/llmService'); // [NEW]
+const { runWithUserToken } = require('./src/services/tokenContext');
+const { isRepoAllowed } = require('./src/utils/repoPolicy');
 require('dotenv').config();
+
+// Fail closed: a production deployment must never run with the well-known
+// fallback session secret (or a weak/missing one), because anyone who knows
+// it can forge session cookies.
+if (process.env.NODE_ENV === 'production') {
+    const sessionSecret = process.env.SESSION_SECRET || '';
+    if (!sessionSecret || sessionSecret === 'sentinel-dev-secret-change-in-prod' || sessionSecret.length < 16) {
+        console.error('[Security] SESSION_SECRET is missing, set to the known fallback value, or shorter than 16 characters. Refusing to start in production. Set a strong SESSION_SECRET environment variable.');
+        process.exit(1);
+    }
+}
 
 // Load optional per-board POST_PR_STATUS mapping
 const BOARD_POST_PR_STATUS_PATH = path.join(__dirname, 'config', 'board_post_pr_status.json');
@@ -50,10 +52,10 @@ try {
 }
 
 function getPostPrStatusForIssue(issue) {
-    // Sentinel keys are always "GH-<number>" so a per-project mapping is not meaningful here.
     // Allow operators to override the post-PR status per repo via the
-    // optional config file (config/board_post_pr_status.json), keyed by
-    // the issue.fields.repo value or by the GITHUB_ISSUES_REPO env var.
+    // optional config file (config/board_post_pr_status.json), which is
+    // keyed by target repo full name (owner/repo) — looked up first from
+    // the issue.fields.repo value, then the GITHUB_ISSUES_REPO env var.
     const repoFromIssue = issue?.fields?.repo;
     const repoFromEnv = process.env.GITHUB_ISSUES_REPO;
     const keys = [repoFromIssue, repoFromEnv].filter(Boolean);
@@ -84,12 +86,10 @@ let systemStatus = {
     currentPayload: null,      // New: Generated YAML content
     nextScanTime: null,
     paused: false,             // Pause state (kept for compatibility)
-    systemLogs: [],            // Global system log stream for UI terminal
-    // Per-user auth state (DEPRECATED - use activeAgents instead)
-    activeUserToken: null,           // OAuth access token from logged-in user
-    activeUserRefreshToken: null,    // OAuth refresh token (if issued)
-    activeUserTokenExpiresAt: null,  // Expiry timestamp (ms since epoch) for access token
-    activeUser: null                 // User info from logged-in user
+    systemLogs: []             // Global system log stream for UI terminal
+    // NOTE: OAuth tokens must NEVER be stored on systemStatus — this object
+    // backs API responses. Per-user tokens live only on the server-side
+    // agent objects in activeAgents (see registerAgent).
 };
 
 // --- MULTI-TENANT AGENT SYSTEM ---
@@ -101,13 +101,21 @@ const activeAgents = new Map();
  * @param {object} user - User object with id, login, name, avatar_url
  * @param {string} token - OAuth access token
  * @param {boolean} hasCopilot - Whether user has Copilot access
+ * @param {object} [options] - Server-side-only auth material
+ * @param {string|null} [options.refreshToken] - OAuth refresh token (never serialized to clients)
+ * @param {number|null} [options.tokenExpiresAt] - Access-token expiry (ms since epoch)
  * @returns {object} The agent object
  */
-function registerAgent(user, token, hasCopilot = false) {
+function registerAgent(user, token, hasCopilot = false, options = {}) {
     const existing = activeAgents.get(user.id);
     const agent = {
         userId: user.id,
         token: token,
+        // Server-side only: refresh material for background token refresh.
+        // The sanitized DTO builders for /api/status must never spread the
+        // raw agent object, so these fields cannot leak to clients.
+        refreshToken: options.refreshToken !== undefined ? options.refreshToken : (existing?.refreshToken || null),
+        tokenExpiresAt: options.tokenExpiresAt !== undefined ? options.tokenExpiresAt : (existing?.tokenExpiresAt || null),
         user: {
             id: user.id,
             login: user.login,
@@ -144,15 +152,6 @@ function removeAgent(userId) {
  */
 function getAgent(userId) {
     return activeAgents.get(userId) || null;
-}
-
-/**
- * Get the first active agent (fallback for single-user mode)
- * @returns {object|null}
- */
-function getFirstAgent() {
-    if (activeAgents.size === 0) return null;
-    return activeAgents.values().next().value;
 }
 
 /**
@@ -270,7 +269,38 @@ function writeLog(message) {
 const session = require('express-session');
 const authService = require('./src/services/authService');
 
-app.use(express.json());
+app.disable('x-powered-by');
+app.use(express.json({ limit: '256kb' }));
+
+// --- Security headers ---
+app.use((req, res, next) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('Referrer-Policy', 'no-referrer');
+    next();
+});
+
+// --- Simple in-memory rate limiter for POST /api/* ---
+// Max 300 POST requests per 15 minutes per IP; 429 JSON beyond that.
+const postRateLimitBuckets = new Map();
+const POST_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
+const POST_RATE_LIMIT_MAX = 300;
+app.use((req, res, next) => {
+    if (req.method !== 'POST' || !req.path.startsWith('/api/')) return next();
+    const now = Date.now();
+    const ip = req.ip || req.socket?.remoteAddress || 'unknown';
+    let bucket = postRateLimitBuckets.get(ip);
+    if (!bucket || now - bucket.windowStart >= POST_RATE_LIMIT_WINDOW_MS) {
+        bucket = { windowStart: now, count: 0 };
+        postRateLimitBuckets.set(ip, bucket);
+    }
+    bucket.count++;
+    if (bucket.count > POST_RATE_LIMIT_MAX) {
+        return res.status(429).json({ error: 'Too many requests. Please try again later.' });
+    }
+    next();
+});
+
 // Trust the first proxy hop (Heroku, Azure App Service, NGINX, etc.) so the
 // secure cookie flag works correctly when terminating TLS upstream.
 if (process.env.NODE_ENV === 'production') {
@@ -288,6 +318,44 @@ app.use(session({
         maxAge: 24 * 60 * 60 * 1000 // 24 hours
     }
 }));
+
+// --- Authorization helpers ---
+/**
+ * Constant-time comparison for the internal-token header. Returns false
+ * unless both values are non-empty strings of equal length.
+ */
+function internalTokenMatches(provided) {
+    const expected = process.env.SENTINEL_INTERNAL_TOKEN || '';
+    if (!provided || !expected) return false;
+    const providedBuf = Buffer.from(String(provided), 'utf8');
+    const expectedBuf = Buffer.from(expected, 'utf8');
+    if (providedBuf.length !== expectedBuf.length) return false;
+    return crypto.timingSafeEqual(providedBuf, expectedBuf);
+}
+
+/**
+ * Shared authorization test used by requireAuth and by /api/status (which
+ * must degrade gracefully instead of returning 401).
+ */
+function isAuthorizedRequest(req) {
+    if (req.session?.user) return true;
+    try {
+        if (authService.getAuthConfig().hasGitHubApp) return true;
+    } catch (_) { /* treat config errors as unauthenticated */ }
+    if (internalTokenMatches(req.get('x-sentinel-internal-token'))) return true;
+    if (process.env.NODE_ENV !== 'production') return true;
+    return false;
+}
+
+/**
+ * Auth guard for API routes. Allows: a logged-in session user, GitHub App
+ * (server-credential) mode, a valid x-sentinel-internal-token header, or
+ * any request in non-production (dev) mode.
+ */
+function requireAuth(req, res, next) {
+    if (isAuthorizedRequest(req)) return next();
+    return res.status(401).json({ error: 'Authentication required' });
+}
 
 // --- OAuth Token Refresh Helpers ---
 /**
@@ -324,13 +392,13 @@ async function getFreshSessionAccessToken(req) {
         req.session.refreshToken = refreshed.refreshToken || refreshToken;
         req.session.accessTokenExpiresAt = newExpiresAt;
 
-        // Also update global status if this user is the active user
-        if (systemStatus.activeUser && req.session.user && systemStatus.activeUser.id === req.session.user.id) {
-            systemStatus.activeUserToken = refreshed.accessToken;
-            systemStatus.activeUserRefreshToken = refreshed.refreshToken || refreshToken;
-            systemStatus.activeUserTokenExpiresAt = newExpiresAt;
-            setActiveToken(refreshed.accessToken);
-            setActiveIssueToken(refreshed.accessToken);
+        // Keep this user's server-side agent in sync so background work
+        // uses the refreshed token too.
+        if (req.session.user) {
+            registerAgent(req.session.user, refreshed.accessToken, req.session.user.copilot_enabled, {
+                refreshToken: refreshed.refreshToken || refreshToken,
+                tokenExpiresAt: newExpiresAt
+            });
         }
 
         console.log('[Auth] Access token refreshed successfully for current session');
@@ -342,36 +410,34 @@ async function getFreshSessionAccessToken(req) {
 }
 
 /**
- * Ensure the global activeUserToken used by background workers is fresh.
- * Safe no-op if no refresh token/expiry is available.
+ * Refresh one agent's access token if it is expired or about to expire,
+ * using the refresh token stored on the agent at login. Safe no-op when
+ * the agent has no refresh material or its token is still valid. Call
+ * this for each agent before background work runs under its token.
+ * @param {object} agent - Agent object from activeAgents
  */
-async function ensureGlobalAccessTokenFresh() {
-    const currentToken = systemStatus.activeUserToken;
-    const refreshToken = systemStatus.activeUserRefreshToken;
-    const expiresAt = systemStatus.activeUserTokenExpiresAt;
-
-    if (!currentToken || !refreshToken || !expiresAt) return;
+async function refreshAgentToken(agent) {
+    if (!agent || !agent.token || !agent.refreshToken || !agent.tokenExpiresAt) return;
 
     const now = Date.now();
-    if (now < expiresAt - 60000) {
+    if (now < agent.tokenExpiresAt - 60000) {
         return; // still valid
     }
 
     try {
-        const refreshed = await authService.refreshAccessToken(refreshToken);
+        const refreshed = await authService.refreshAccessToken(agent.refreshToken);
         const newExpiresAt = refreshed.expiresIn
             ? Date.now() + (refreshed.expiresIn * 1000)
             : null;
 
-        systemStatus.activeUserToken = refreshed.accessToken;
-        systemStatus.activeUserRefreshToken = refreshed.refreshToken || refreshToken;
-        systemStatus.activeUserTokenExpiresAt = newExpiresAt;
-        setActiveToken(refreshed.accessToken);
-        setActiveIssueToken(refreshed.accessToken);
+        registerAgent(agent.user, refreshed.accessToken, agent.user.copilot_enabled, {
+            refreshToken: refreshed.refreshToken || agent.refreshToken,
+            tokenExpiresAt: newExpiresAt
+        });
 
-        console.log('[Auth] Global access token refreshed successfully');
+        console.log(`[Auth] Access token refreshed successfully for agent ${agent.user.login}`);
     } catch (e) {
-        console.error('[Auth] Failed to refresh global access token:', e.message);
+        console.error(`[Auth] Failed to refresh access token for agent ${agent.user?.login || agent.userId}:`, e.message);
     }
 }
 
@@ -412,12 +478,18 @@ app.get('/api/auth/login', (req, res) => {
         return res.status(400).json({ error: 'OAuth not configured. Set OAUTH_CLIENT_ID and OAUTH_CLIENT_SECRET.' });
     }
     const redirectUri = `${req.protocol}://${req.get('host')}/api/auth/callback`;
-    const authUrl = authService.getAuthorizationUrl(redirectUri);
+    // CSRF protection: generate a fresh state, keep it in the session, and
+    // require the callback to present the same value.
+    const state = authService.generateState();
+    if (req.session) {
+        req.session.oauthState = state;
+    }
+    const authUrl = authService.getAuthorizationUrl(redirectUri, state);
     res.redirect(authUrl);
 });
 
 app.get('/api/auth/callback', async (req, res) => {
-    const { code, error } = req.query;
+    const { code, error, state } = req.query;
 
     if (error) {
         return res.redirect('/?error=' + encodeURIComponent(error));
@@ -425,6 +497,16 @@ app.get('/api/auth/callback', async (req, res) => {
 
     if (!code) {
         return res.redirect('/?error=missing_code');
+    }
+
+    // Verify the OAuth state against the value stored at login (CSRF check).
+    const expectedState = req.session?.oauthState;
+    if (req.session) {
+        delete req.session.oauthState;
+    }
+    if (!state || !expectedState || state !== expectedState) {
+        console.warn('[Auth] OAuth callback rejected: state mismatch');
+        return res.redirect('/?error=invalid_state');
     }
 
     try {
@@ -449,22 +531,6 @@ app.get('/api/auth/callback', async (req, res) => {
         req.session.accessTokenExpiresAt = accessTokenExpiresAt;
         req.session.authMethod = 'oauth';
 
-        // Store active user token for background processing (ticket processing, PR creation)
-        // DEPRECATED: These global fields maintained for backward compatibility
-        systemStatus.activeUserToken = tokenData.accessToken;
-        systemStatus.activeUserRefreshToken = tokenData.refreshToken || null;
-        systemStatus.activeUserTokenExpiresAt = accessTokenExpiresAt;
-        systemStatus.activeUser = {
-            id: user.id,
-            login: user.login,
-            name: user.name,
-            avatar_url: user.avatar_url
-        };
-
-        // Set active token in githubService for all API calls
-        setActiveToken(tokenData.accessToken);
-        setActiveIssueToken(tokenData.accessToken);
-
         // [NEW] Check if the user has installed the GitHub App
         const isInstalled = await checkAppInstallation(tokenData.accessToken);
 
@@ -476,11 +542,13 @@ app.get('/api/auth/callback', async (req, res) => {
         // Store Copilot status in session
         req.session.user.copilot_enabled = hasCopilot;
 
-        // Update system status (DEPRECATED)
-        systemStatus.activeUser.copilot_enabled = hasCopilot;
-
-        // [NEW] Register agent in multi-tenant system
-        const agent = registerAgent(user, tokenData.accessToken, hasCopilot);
+        // Register the agent in the multi-tenant system. The access token
+        // lives on the session and on this server-side agent object only —
+        // never on systemStatus, which backs API responses.
+        const agent = registerAgent(user, tokenData.accessToken, hasCopilot, {
+            refreshToken: tokenData.refreshToken || null,
+            tokenExpiresAt: accessTokenExpiresAt
+        });
         req.session.agentId = agent.userId;
 
         console.log(`[DEBUG] isInstalled type: ${typeof isInstalled}, value: ${isInstalled}`);
@@ -501,7 +569,7 @@ app.get('/api/auth/callback', async (req, res) => {
     }
 });
 
-app.post('/api/auth/logout', (req, res) => {
+app.post('/api/auth/logout', requireAuth, (req, res) => {
     if (req.session) {
         const userId = req.session.user?.id;
         const userLogin = req.session.user?.login || 'Unknown';
@@ -515,15 +583,8 @@ app.post('/api/auth/logout', (req, res) => {
             if (err) {
                 return res.status(500).json({ error: 'Failed to logout' });
             }
-            // Clear active user token for background processing (DEPRECATED)
-            systemStatus.activeUserToken = null;
-            systemStatus.activeUser = null;
-
-            // Clear active token in githubService
-            clearUserToken();
-            setActiveToken(null);
-            setActiveIssueToken(null);
-
+            // Only this user's agent was removed above; other users'
+            // agents and tokens are unaffected.
             console.log(`[Auth] User ${userLogin} logged out - agent removed`);
             res.json({ message: 'Logged out successfully' });
         });
@@ -537,17 +598,17 @@ app.get('/api/auth/install', (req, res) => {
 });
 
 // --- Optional: GH Copilot Suggest Integration ---
-app.post('/api/copilot/suggest', async (req, res) => {
+app.post('/api/copilot/suggest', requireAuth, async (req, res) => {
     if (!USE_GH_COPILOT) {
         return res.status(400).json({ error: 'GH Copilot integration disabled. Set USE_GH_COPILOT=true' });
     }
 
-    const { filename, message, commit } = req.body || {};
     // gh copilot suggest does not support --message/--filename; call plain suggest
     const args = ['copilot', 'suggest'];
 
-    // [NEW] Use user's token for Copilot access, refreshing if needed
-    const userToken = await getFreshSessionAccessToken(req) || systemStatus.activeUserToken;
+    // Use the current session's token only (refreshed if needed) — never
+    // another user's token.
+    const userToken = await getFreshSessionAccessToken(req);
     const env = { ...process.env };
     if (userToken) {
         env.GITHUB_TOKEN = userToken;
@@ -562,19 +623,33 @@ app.post('/api/copilot/suggest', async (req, res) => {
 });
 
 // --- API for UI ---
-app.get('/api/status', (req, res) => {
-    // Get the current user's agent if logged in
-    const userId = req.session?.user?.id;
-    const myAgent = userId ? getAgent(userId) : null;
+// Sanitized agent DTO builders. These pick explicit fields only — the raw
+// agent object carries OAuth tokens and must never be spread or serialized.
+function sanitizeAgentUser(agent) {
+    if (!agent?.user) return null;
+    return {
+        id: agent.user.id,
+        login: agent.user.login,
+        name: agent.user.name,
+        avatar_url: agent.user.avatar_url,
+        copilot_enabled: agent.user.copilot_enabled
+    };
+}
 
-    // Update agent's last activity timestamp
-    if (myAgent) {
-        myAgent.lastActivity = Date.now();
-    }
+function sanitizeMyAgent(agent) {
+    if (!agent) return null;
+    return {
+        userId: agent.userId,
+        user: sanitizeAgentUser(agent),
+        tickets: agent.tickets,
+        logs: agent.logs,
+        lastActivity: agent.lastActivity
+    };
+}
 
-    // Build list of all active agent identities (sanitized - no tokens)
+function sanitizeAllAgents() {
     const allAgents = [];
-    for (const [id, agent] of activeAgents) {
+    for (const agent of activeAgents.values()) {
         allAgents.push({
             userId: agent.userId,
             login: agent.user.login,
@@ -585,37 +660,100 @@ app.get('/api/status', (req, res) => {
             lastActivity: agent.lastActivity
         });
     }
+    return allAgents;
+}
 
+app.get('/api/status', (req, res) => {
+    // The public page polls this endpoint, so it must not 401. Authorized
+    // callers get the full status; unauthenticated production callers get
+    // the same shape with empty/default values. Neither variant ever
+    // contains a token or refresh token.
+    if (!isAuthorizedRequest(req)) {
+        return res.json({
+            authenticated: false,
+            currentPhase: 'Ready',
+            currentTicketKey: null,
+            currentTicketLogs: [],
+            currentIssueUrl: null,
+            currentPrUrl: null,
+            currentPayload: null,
+            nextScanTime: null,
+            paused: false,
+            processedCount: 0,
+            activeTickets: [],
+            monitoredTickets: [],
+            scanHistory: [],
+            systemLogs: [],
+            activeUser: null,
+            myAgent: null,
+            allAgents: [],
+            activeAgentsCount: 0
+        });
+    }
+
+    // Get the current user's agent if logged in
+    const userId = req.session?.user?.id;
+    const myAgent = userId ? getAgent(userId) : null;
+
+    // Update agent's last activity timestamp
+    if (myAgent) {
+        myAgent.lastActivity = Date.now();
+    }
+
+    // The active user for the UI: prefer the session user's agent, then the
+    // session user itself. Sanitized either way — no tokens.
+    const sessionUser = req.session?.user || null;
+    const activeUser = myAgent
+        ? sanitizeAgentUser(myAgent)
+        : (sessionUser ? {
+            id: sessionUser.id,
+            login: sessionUser.login,
+            name: sessionUser.name,
+            avatar_url: sessionUser.avatar_url,
+            copilot_enabled: sessionUser.copilot_enabled
+        } : null);
+
+    // Explicit DTO — never spread systemStatus (it must stay free of
+    // secrets, and an allowlist keeps it that way if fields are added).
     res.json({
-        ...systemStatus,
-        // Multi-tenant fields
-        myAgent: myAgent ? {
-            userId: myAgent.userId,
-            user: myAgent.user,
-            tickets: myAgent.tickets,
-            logs: myAgent.logs,
-            lastActivity: myAgent.lastActivity
-        } : null,
-        allAgents: allAgents,
+        currentPhase: systemStatus.currentPhase,
+        currentTicketKey: systemStatus.currentTicketKey,
+        currentTicketLogs: systemStatus.currentTicketLogs,
+        currentIssueUrl: systemStatus.currentIssueUrl,
+        currentPrUrl: systemStatus.currentPrUrl,
+        currentPayload: systemStatus.currentPayload,
+        nextScanTime: systemStatus.nextScanTime,
+        paused: systemStatus.paused,
+        processedCount: systemStatus.processedCount,
+        activeTickets: systemStatus.activeTickets,
+        monitoredTickets: systemStatus.monitoredTickets,
+        scanHistory: systemStatus.scanHistory,
+        systemLogs: systemStatus.systemLogs,
+        activeUser,
+        myAgent: sanitizeMyAgent(myAgent),
+        allAgents: sanitizeAllAgents(),
         activeAgentsCount: activeAgents.size
     });
 });
 
 // Return GitHub Issues source info to the frontend
-app.get('/api/issues-source', (req, res) => {
+app.get('/api/issues-source', requireAuth, (req, res) => {
     res.json({ source: 'github', repo: process.env.GITHUB_ISSUES_REPO });
 });
 
 // Deprecated alias for /api/jira-base-url — kept for backwards compat
-app.get('/api/jira-base-url', (req, res) => {
+app.get('/api/jira-base-url', requireAuth, (req, res) => {
     res.json({ source: 'github', repo: process.env.GITHUB_ISSUES_REPO });
 });
 
 // List monitored GitHub repositories (from GitHub Issues)
-app.get('/api/projects', async (req, res) => {
+app.get('/api/projects', requireAuth, async (req, res) => {
     try {
         const { getProjects } = require('./src/services/githubIssueService');
-        const projectList = await getProjects();
+        const freshToken = await getFreshSessionAccessToken(req);
+        const projectList = freshToken
+            ? await runWithUserToken(freshToken, () => getProjects())
+            : await getProjects();
         const projects = projectList.map(p => p.key || p);
         res.json({ projects });
     } catch (e) {
@@ -624,7 +762,7 @@ app.get('/api/projects', async (req, res) => {
 });
 
 // Manual Poll Trigger
-app.post('/api/poll', (req, res) => {
+app.post('/api/poll', requireAuth, (req, res) => {
     console.log('[API] Manual scan triggered...');
     if (global.forcePoll && typeof global.forcePoll === 'function') {
         // Don't allow concurrent scans
@@ -639,16 +777,53 @@ app.post('/api/poll', (req, res) => {
 });
 
 // --- API for Config (Secrets) ---
-app.post('/api/config', (req, res) => {
+// Only these keys may be written through the runtime config endpoint.
+const CONFIG_ALLOWLIST = new Set([
+    'GITHUB_ISSUES_REPO',
+    'ISSUE_LABEL',
+    'DEFAULT_REPO',
+    'ALLOWED_ORGS',
+    'ALLOWED_REPOS',
+    'GHUB_ORG',
+    'GHUB_TOKEN',
+    'LLM_API_KEY',
+    'LLM_ENDPOINT',
+    'LLM_MODEL',
+    'AZURE_OPENAI_API_KEY',
+    'AZURE_OPENAI_ENDPOINT',
+    'AZURE_OPENAI_DEPLOYMENT',
+    'USE_GH_COPILOT',
+    'POST_PR_STATUS'
+]);
+
+app.post('/api/config', requireAuth, (req, res) => {
     // Editing .env at runtime is only supported in non-production environments.
     if (process.env.NODE_ENV === 'production') {
         return res.status(403).json({ error: 'Runtime config editing is disabled in production.' });
     }
 
-    const secrets = req.body; // Expect { JIRA_BASE_URL: "...", ... }
+    const secrets = req.body; // Expect { GITHUB_ISSUES_REPO: "...", ... }
 
-    if (!secrets || Object.keys(secrets).length === 0) {
+    if (!secrets || typeof secrets !== 'object' || Object.keys(secrets).length === 0) {
         return res.status(400).json({ error: 'No configuration provided' });
+    }
+
+    // Reject unknown keys — this endpoint must not become a generic
+    // environment-variable writer.
+    const unknownKeys = Object.keys(secrets).filter(k => !CONFIG_ALLOWLIST.has(k));
+    if (unknownKeys.length > 0) {
+        return res.status(400).json({ error: `Configuration keys not allowed: ${unknownKeys.join(', ')}` });
+    }
+
+    // Reject values that could break out of the double-quoted .env format
+    // (embedded quotes, backslashes, or newlines would corrupt/inject
+    // entries). Accepted values are written wrapped in double quotes.
+    for (const [key, value] of Object.entries(secrets)) {
+        const str = String(value);
+        if (str.includes('"') || str.includes('\\') || str.includes('\n') || str.includes('\r')) {
+            return res.status(400).json({ error: `Invalid value for ${key}: values must not contain double quotes, backslashes, or newlines` });
+        }
+        secrets[key] = str;
     }
 
     try {
@@ -699,7 +874,7 @@ app.post('/api/config', (req, res) => {
 });
 
 // --- API for Pause/Resume ---
-app.post('/api/pause', (req, res) => {
+app.post('/api/pause', requireAuth, (req, res) => {
     const { paused } = req.body;
     if (typeof paused !== 'boolean') {
         return res.status(400).json({ error: 'paused boolean is required' });
@@ -712,7 +887,7 @@ app.post('/api/pause', (req, res) => {
 });
 
 // --- On-Demand MCP Inspector ---
-app.post('/api/inspector', (req, res) => {
+app.post('/api/inspector', requireAuth, (req, res) => {
     // The MCP Inspector is a developer tool that shells out to npx and
     // attempts to open a browser. This is not suitable for production
     // container environments, so we guard it behind NODE_ENV.
@@ -755,7 +930,7 @@ app.post('/api/inspector', (req, res) => {
 });
 
 // --- Download Logs Endpoint ---
-app.get('/api/logs/download', (req, res) => {
+app.get('/api/logs/download', requireAuth, (req, res) => {
     const logFile = path.join(LOG_DIR, 'server.log');
     if (fs.existsSync(logFile)) {
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
@@ -783,7 +958,7 @@ function logProgress(message) {
 }
 
 // --- API for Repos (Per-User) ---
-app.get('/api/repos', async (req, res) => {
+app.get('/api/repos', requireAuth, async (req, res) => {
     try {
         // Use user's OAuth token if logged in (refreshing if needed), otherwise fallback to app auth
         const userToken = await getFreshSessionAccessToken(req);
@@ -841,9 +1016,12 @@ app.get('/api/repos', async (req, res) => {
 });
 
 // --- API for Inspection ---
-app.get('/api/inspections', async (req, res) => {
+app.get('/api/inspections', requireAuth, async (req, res) => {
     try {
-        const tickets = await getInspectionTickets();
+        const freshToken = await getFreshSessionAccessToken(req);
+        const tickets = freshToken
+            ? await runWithUserToken(freshToken, () => getInspectionTickets())
+            : await getInspectionTickets();
         res.json({ tickets });
     } catch (e) {
         console.error('[API] Failed to fetch inspections:', e.message);
@@ -851,7 +1029,7 @@ app.get('/api/inspections', async (req, res) => {
     }
 });
 
-app.post('/api/inspect', async (req, res) => {
+app.post('/api/inspect', requireAuth, async (req, res) => {
     const { repoName, createIssue: shouldCreateIssue = true } = req.body;
     if (!repoName) return res.status(400).json({ error: 'repoName is required' });
 
@@ -863,11 +1041,17 @@ app.post('/api/inspect', async (req, res) => {
 
     try {
         const { processRepo } = require('./scripts/inspect_repo');
-        // Run inspection with a custom logger that feeds into UI logs
-        // processRepo returns the created/updated issue key if any
-        const inspectResult = await processRepo(repoName, false, (msg) => {
+        // Run inspection with a custom logger that feeds into UI logs.
+        // processRepo(repoName, logCallbackFn, options) returns the
+        // created/updated issue key if any; options.createIssue === false
+        // skips issue creation.
+        const loggerFn = (msg) => {
             logProgress(msg);
-        });
+        };
+        const freshToken = await getFreshSessionAccessToken(req);
+        const inspectResult = freshToken
+            ? await runWithUserToken(freshToken, () => processRepo(repoName, loggerFn, { createIssue: shouldCreateIssue }))
+            : await processRepo(repoName, loggerFn, { createIssue: shouldCreateIssue });
         logProgress(`Inspection complete for ${repoName}.`);
 
         const response = { message: 'Inspection complete' };
@@ -888,7 +1072,7 @@ app.post('/api/inspect', async (req, res) => {
 });
 
 // --- API: Create GitHub Issue ---
-app.post('/api/tickets', async (req, res) => {
+app.post('/api/tickets', requireAuth, async (req, res) => {
     try {
         const { block, title, repoName, description, priority } = req.body || {};
 
@@ -916,9 +1100,10 @@ app.post('/api/tickets', async (req, res) => {
 
         const priorityName = (priority || 'Medium').trim();
 
+        const freshToken = await getFreshSessionAccessToken(req);
         const issue = await createIssue(targetRepo, summary, fullDescription, {
             priorityName
-        });
+        }, freshToken);
 
         const issueRepo = process.env.GITHUB_ISSUES_REPO || repoName;
         const url = `https://github.com/${issueRepo}/issues/${issue.number}`;
@@ -938,7 +1123,7 @@ app.post('/api/tickets', async (req, res) => {
 
 
 // --- Core Logic ---
-async function processTicketData(issue) {
+async function processTicketData(issue, agent) {
     if (!issue || !issue.fields) return;
 
     const issueKey = issue.key;
@@ -973,16 +1158,13 @@ async function processTicketData(issue) {
     const projectDefaultRepo = process.env.DEFAULT_REPO;
     console.log(`[Repo Lookup] Default repo from env: ${projectDefaultRepo || '(none)'}`);
 
-    // Resolve repo from fields, then description/summary, then env default
-    function extractOwnerRepo(txt) {
-        if (!txt || typeof txt !== 'string') return null;
-        const m = txt.match(/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)/);
-        return m ? `${m[1]}/${m[2]}` : null;
-    }
-
+    // Resolve the target repo ONLY from the structured repo field or the
+    // DEFAULT_REPO env var. Free-text extraction from the issue body was
+    // removed: issue text is attacker-controlled and the first
+    // "owner/repo"-looking string in it (e.g. "CI/CD") is not a safe way
+    // to choose a repository to write to.
     const fieldRepo = (ticketData.repo || ticketData.repoName || '').trim();
-    const descRepo = extractOwnerRepo(ticketData.description) || extractOwnerRepo(ticketData.summary);
-    const repoName = fieldRepo || descRepo || projectDefaultRepo;
+    const repoName = fieldRepo || projectDefaultRepo;
 
     if (!repoName) {
         const msg = `No target repository could be resolved for ${issueKey}. Set the issue body to include "**repo:** owner/name" or define the DEFAULT_REPO env var.`;
@@ -998,24 +1180,38 @@ async function processTicketData(issue) {
     // Pre-validate repo access and cache default branch
     let resolvedDefaultBranch = null;
 
-    // Enforce allowed orgs scope
-    // Use the active agent's OAuth token; fall back to the (deprecated) global token
-    // for backwards compatibility with single-user installs.
-    const primaryAgent = getFirstAgent();
-    const activeToken = primaryAgent?.token || systemStatus.activeUserToken;
-    if (!activeToken) {
+    // All GitHub work for this ticket runs under the owning agent's token
+    // (via the caller's token context). Without an agent token, only
+    // GitHub App (server credential) mode may proceed.
+    const activeToken = agent?.token || null;
+    if (!activeToken && !authService.getAuthConfig().hasGitHubApp) {
         logProgress(`Skipping ticket ${issueKey || 'unknown'} - No active user logged in.`);
         return;
     }
 
-    const hasAccess = await githubService.checkRepoAccess(repoName, activeToken);
-    if (!hasAccess) {
-        logProgress(`Skipping ticket ${issueKey} - User does not have push access to ${repoName}.`);
-        // Do NOT transition or comment, just ignore.
+    // Enforce the allowed-repo scope (ALLOWED_REPOS / ALLOWED_ORGS policy)
+    // before touching the target repository.
+    if (!isRepoAllowed(repoName, { userLogin: agent?.user?.login })) {
+        const msg = `Repository ${repoName} is outside the allowed scope for Sentinel. Add it to ALLOWED_REPOS or its owner to ALLOWED_ORGS to permit processing.`;
+        logProgress(`Skipping ticket ${issueKey} - ${msg}`);
+        try {
+            await addComment(issueKey, `❌ ${msg}`);
+            await transitionIssue(issueKey, 'To Do');
+        } catch (_) { /* ignore */ }
         systemStatus.activeTickets = systemStatus.activeTickets.filter(t => t.key !== issueKey);
         return;
     }
-    logProgress(`User access verified for ${repoName}`);
+
+    if (activeToken) {
+        const hasAccess = await githubService.checkRepoAccess(repoName, activeToken);
+        if (!hasAccess) {
+            logProgress(`Skipping ticket ${issueKey} - User does not have push access to ${repoName}.`);
+            // Do NOT transition or comment, just ignore.
+            systemStatus.activeTickets = systemStatus.activeTickets.filter(t => t.key !== issueKey);
+            return;
+        }
+        logProgress(`User access verified for ${repoName}`);
+    }
 
     // Validate repo existence/access early
     try {
@@ -1034,7 +1230,7 @@ async function processTicketData(issue) {
     }
 
     // Smart Language Detection
-    let language = ticketData.customfield_language || ticketData.language;
+    let language = ticketData.language;
 
     // 1. Description Parsing
     if (!language && ticketData.description) {
@@ -1057,7 +1253,7 @@ async function processTicketData(issue) {
     let repoInstructions = {};
     let repoConfig = {};
 
-    if (!language || true) { // Always analyze for deep config even if language is known
+    { // Always analyze for deep config even if language is known
         // Status Update: Analyzing
         // updateStatus(issue.key, 'Analyzing Repository...', currentTicket); // currentTicket is not defined here
 
@@ -1123,9 +1319,11 @@ async function processTicketData(issue) {
     }
 
     // Default commands based on language (if not specified)
-    // Priority: Jira Field > Repo Instructions (MD) > Repo Config (Code) > Language Default
-    let buildCommand = ticketData.customfield_build || repoInstructions.buildCommand || repoConfig.buildCommand || ticketData.buildCommand;
-    let testCommand = ticketData.customfield_test || repoInstructions.testCommand || repoConfig.testCommand || ticketData.testCommand;
+    // Priority: Issue directive (fields.build/test parsed from the issue
+    // body by mapIssue) > Repo Instructions (MD) > Repo Config (Code) >
+    // Language Default
+    let buildCommand = ticketData.build || repoInstructions.buildCommand || repoConfig.buildCommand || ticketData.buildCommand;
+    let testCommand = ticketData.test || repoInstructions.testCommand || repoConfig.testCommand || ticketData.testCommand;
 
     if (!buildCommand) {
         if (language === 'node') buildCommand = 'npm run build';
@@ -1140,7 +1338,7 @@ async function processTicketData(issue) {
         if (language === 'java') testCommand = './mvnw test';
     }
 
-    const deployTarget = ticketData.customfield_deploy || ticketData.deployTarget || 'azure-webapp';
+    const deployTarget = ticketData.deploy || ticketData.deployTarget || 'azure-webapp';
 
     try {
         // 1. Move to In Progress
@@ -1166,7 +1364,6 @@ async function processTicketData(issue) {
         let workflowYml;
         if (USE_GH_COPILOT) {
             logProgress(`Running gh copilot suggest for pre-PR generation...`);
-            const targetFile = `.github/workflows/${repoName.split('/')[1] || 'repo'}-ci.yml`;
             const promptParts = [
                 `GitHub Issue: ${issueKey}`,
                 `Repo: ${repoName}`,
@@ -1305,6 +1502,7 @@ async function processTicketData(issue) {
         systemStatus.processedCount++;
         const historyItem = {
             key: issueKey,
+            agentUserId: agent?.userId || null,
             priority,
             result: 'Success',
             time: new Date().toLocaleTimeString(),
@@ -1428,6 +1626,7 @@ async function startPolling() {
 
                     const historyItem = {
                         key: issueKey,
+                        agentUserId: null,
                         priority,
                         result: 'Resumed',
                         time: new Date().toLocaleTimeString(),
@@ -1458,7 +1657,9 @@ async function startPolling() {
                     writeLog(`[Sentinel] Resumed monitoring PR ${pr.prUrl} for issue ${issueKey}.`);
                     try {
                         await addComment(issueKey, `🔁 Server restarted: resuming monitoring for active PR\nPR: ${pr.prUrl}`);
-                    } catch (_) { }
+                    } catch (commentErr) {
+                        writeLog(`[Sentinel] Failed to post resume comment for ${issueKey}: ${commentErr.message}`);
+                    }
                 } catch (e) {
                     writeLog(`[Sentinel] Failed to reconcile ${issueKey}: ${e.message}`);
                 }
@@ -1470,8 +1671,6 @@ async function startPolling() {
 
     const poll = async () => {
         try {
-            // Ensure global OAuth token used by background workers is still valid
-            await ensureGlobalAccessTokenFresh();
             if (systemStatus.paused) {
                 systemStatus.currentPhase = 'Paused';
                 systemStatus.currentTicketKey = 'PAUSED';
@@ -1479,12 +1678,34 @@ async function startPolling() {
                 return;
             }
 
-            // Check if any user is logged in - require OAuth for all GitHub operations
-            // Use multi-tenant activeAgents, fallback to deprecated activeUserToken
-            const agent = getFirstAgent();
-            const activeToken = agent?.token || systemStatus.activeUserToken;
+            const agents = [...activeAgents.values()];
 
-            if (!activeToken) {
+            if (agents.length === 0) {
+                if (authService.getAuthConfig().hasGitHubApp) {
+                    // GitHub App mode: one scan with server credentials,
+                    // no per-user token context.
+                    systemStatus.currentPhase = 'Scanning';
+                    systemStatus.nextScanTime = null;
+                    writeLog('Scanning GitHub Issues for new tickets (GitHub App mode)...');
+
+                    const issues = await getPendingTickets();
+                    if (issues.length > 0) {
+                        writeLog(`Found ${issues.length} pending tickets.`);
+                        systemStatus.activeTickets = issues.map(i => ({
+                            key: i.key,
+                            priority: i.fields.priority?.name || 'Medium',
+                            status: 'Queued'
+                        }));
+                        systemStatus.currentPhase = 'Processing';
+                        for (const issue of issues) {
+                            await processTicketData(issue, null);
+                        }
+                    } else {
+                        writeLog('No pending issues found.');
+                    }
+                    return;
+                }
+
                 systemStatus.currentPhase = 'Waiting for Login';
                 systemStatus.currentTicketKey = 'LOGIN_REQUIRED';
                 systemStatus.currentTicketLogs = ['⚠️ Please login with GitHub to start processing issues'];
@@ -1492,40 +1713,42 @@ async function startPolling() {
                 return;
             }
 
-            // Ensure activeUserToken is set for legacy code that uses it
-            if (agent?.token && !systemStatus.activeUserToken) {
-                systemStatus.activeUserToken = agent.token;
-                systemStatus.activeUser = agent.user;
-                setActiveToken(agent.token);
-                setActiveIssueToken(agent.token);
-                writeLog(`[Poll] Using token from agent ${agent.user.login}`);
-            }
+            // Process each logged-in user's queue sequentially, under that
+            // user's own token context — tokens are never shared or mixed
+            // between users.
+            for (const agent of agents) {
+                await refreshAgentToken(agent);
+                // Re-fetch the agent: refreshAgentToken may have replaced it.
+                const currentAgent = getAgent(agent.userId) || agent;
 
-            // PHASE: Scanning
-            systemStatus.currentPhase = 'Scanning';
-            systemStatus.nextScanTime = null;
+                await runWithUserToken(currentAgent.token, async () => {
+                    // PHASE: Scanning
+                    systemStatus.currentPhase = 'Scanning';
+                    systemStatus.nextScanTime = null;
 
-            writeLog('Scanning GitHub Issues for new tickets...');
+                    writeLog(`Scanning GitHub Issues for new tickets (agent ${currentAgent.user.login})...`);
 
-            let issues = await getPendingTickets();
+                    const issues = await getPendingTickets();
 
-            if (issues.length > 0) {
-                writeLog(`Found ${issues.length} pending tickets.`);
+                    if (issues.length > 0) {
+                        writeLog(`Found ${issues.length} pending tickets.`);
 
-                // Populate Queue
-                systemStatus.activeTickets = issues.map(i => ({
-                    key: i.key,
-                    priority: i.fields.priority?.name || 'Medium',
-                    status: 'Queued'
-                }));
+                        // Populate Queue
+                        systemStatus.activeTickets = issues.map(i => ({
+                            key: i.key,
+                            priority: i.fields.priority?.name || 'Medium',
+                            status: 'Queued'
+                        }));
 
-                // PHASE: Processing loop
-                systemStatus.currentPhase = 'Processing';
-                for (const issue of issues) {
-                    await processTicketData(issue);
-                }
-            } else {
-                writeLog('No pending issues found.');
+                        // PHASE: Processing loop
+                        systemStatus.currentPhase = 'Processing';
+                        for (const issue of issues) {
+                            await processTicketData(issue, currentAgent);
+                        }
+                    } else {
+                        writeLog('No pending issues found.');
+                    }
+                });
             }
         } catch (error) {
             writeLog(`Scan error: ${error.message}`);
@@ -1539,103 +1762,202 @@ async function startPolling() {
 
     const monitorChecks = async () => {
         try {
-            // Keep background GitHub token fresh for status checks as well
-            await ensureGlobalAccessTokenFresh();
             if (systemStatus.monitoredTickets.length > 0) {
-                // console.log('Checking CI status for monitored tickets...');
-                for (const ticket of systemStatus.monitoredTickets) {
+                const { getLatestWorkflowRunForRef, getJobsForRun, getPullRequestDetails, getPullRequestChecks, isPullRequestMerged } = require('./src/services/githubService');
+
+                // Iterate over a COPY: tickets are removed from
+                // systemStatus.monitoredTickets when they reach a terminal state.
+                for (const ticket of [...systemStatus.monitoredTickets]) {
                     if (!ticket.branch) continue;
-                    const { getLatestWorkflowRunForRef, getJobsForRun, getPullRequestDetails, isPullRequestMerged, summarizeFailureFromRun, getLatestDeploymentUrl } = require('./src/services/githubService');
 
-                    // Prefer headSha if present for precise run lookup
-                    const ref = ticket.headSha || ticket.branch;
-                    const latestRun = await getLatestWorkflowRunForRef({ repoName: ticket.repoName, ref });
-                    let jobs = [];
-                    if (latestRun && latestRun.id) {
-                        jobs = await getJobsForRun({ repoName: ticket.repoName, runId: latestRun.id });
-                    }
-                    ticket.checks = jobs.map(j => ({ name: j.name, status: j.status, conclusion: j.conclusion, url: j.html_url || (latestRun ? latestRun.html_url : '') }));
+                    // Each ticket is monitored under its owning agent's
+                    // token context (when the agent is still registered).
+                    const agent = ticket.agentUserId ? getAgent(ticket.agentUserId) : null;
 
-                    // Attempt to detect and merge Copilot sub PR into our feature branch
-                    if (!ticket.copilotMerged && ticket.prUrl) {
-                        try {
-                            const mainPrNumber = parseInt(ticket.prUrl.split('/').pop(), 10);
-                            const mainPr = await getPullRequestDetails({ repoName: ticket.repoName, pull_number: mainPrNumber });
-                            const subPr = await findCopilotSubPR({ repoName: ticket.repoName, mainPrNumber });
-                            if (subPr) {
-                                ticket.copilotPrUrl = subPr.html_url;
-                                // [NEW] Capture Creation Time for Timer
-                                if (!ticket.copilotCreatedAt) {
-                                    ticket.copilotCreatedAt = subPr.created_at;
+                    const work = async () => {
+                        // Prefer headSha if present for precise run lookup
+                        const ref = ticket.headSha || ticket.branch;
+                        const latestRun = await getLatestWorkflowRunForRef({ repoName: ticket.repoName, ref });
+                        let jobs = [];
+                        if (latestRun && latestRun.id) {
+                            jobs = await getJobsForRun({ repoName: ticket.repoName, runId: latestRun.id });
+                        }
+                        ticket.checks = jobs.map(j => ({ name: j.name, status: j.status, conclusion: j.conclusion, url: j.html_url || (latestRun ? latestRun.html_url : '') }));
+
+                        // Fetch the main PR once when we have its URL
+                        let mainPr = null;
+                        let mainPrNumber = null;
+                        if (ticket.prUrl) {
+                            mainPrNumber = parseInt(ticket.prUrl.split('/').pop(), 10);
+                            try {
+                                mainPr = await getPullRequestDetails({ repoName: ticket.repoName, pull_number: mainPrNumber });
+                            } catch (e) {
+                                writeLog(`[Sentinel] Failed to fetch main PR for ${ticket.key}: ${e.message}`);
+                            }
+                        }
+
+                        const removeFromMonitoring = () => {
+                            systemStatus.monitoredTickets = systemStatus.monitoredTickets.filter(t => t !== ticket);
+                        };
+
+                        // --- Main-PR lifecycle ---
+                        if (mainPr?.merged) {
+                            if (!ticket.prMergedCommented) {
+                                try {
+                                    await addComment(ticket.key, `✅ **Workflow PR merged!**\n\nPR: ${ticket.prUrl}\n\nSentinel has completed this ticket — moving it to Done.`);
+                                    await transitionIssue(ticket.key, 'Done');
+                                } catch (e) {
+                                    writeLog(`[Sentinel] Failed to close out ${ticket.key} after PR merge: ${e.message}`);
                                 }
+                                ticket.prMergedCommented = true;
+                            }
+                            ticket.result = 'Success';
+                            removeFromMonitoring();
+                            schedulePersistState();
+                            return;
+                        }
 
-                                const hasWipLabel = Array.isArray(subPr.labels) && subPr.labels.some(l => /\bWIP\b/i.test(l.name || ''));
-                                const isWipTitle = /\bWIP\b/i.test(subPr.title || '');
-                                // const isDraft = !!subPr.draft; // User Requested to ignore Draft as a blocker
+                        if (mainPr && mainPr.state === 'closed') {
+                            // Closed without merging (merged is handled above)
+                            if (!ticket.prMergedCommented) {
+                                try {
+                                    await addComment(ticket.key, `⚠️ **Workflow PR was closed without merging.**\n\nPR: ${ticket.prUrl}\n\nMoving this ticket back to To Do.`);
+                                    await transitionIssue(ticket.key, 'To Do');
+                                } catch (e) {
+                                    writeLog(`[Sentinel] Failed to report closed PR for ${ticket.key}: ${e.message}`);
+                                }
+                                ticket.prMergedCommented = true;
+                            }
+                            removeFromMonitoring();
+                            schedulePersistState();
+                            return;
+                        }
 
-                                // Only block if explicit WIP title
-                                const isWorkInProgress = isWipTitle; // (or hasWipLabel if we wanted to be stricter, but user said 'marked WIP' check title)
+                        // --- CI failure reporting (main PR workflow run) ---
+                        if (latestRun?.status === 'completed' && latestRun?.conclusion === 'failure' && !ticket.failureCommentPosted) {
+                            const failingJobs = jobs.filter(j => j.conclusion === 'failure').map(j => j.name);
+                            try {
+                                await addComment(ticket.key, `❌ **CI failed** for the workflow PR.\n\nRun: ${latestRun.html_url || ''}\nFailing jobs: ${failingJobs.length ? failingJobs.join(', ') : 'see run details'}\n\nMoving this ticket back to To Do.`);
+                                await transitionIssue(ticket.key, 'To Do');
+                            } catch (e) {
+                                writeLog(`[Sentinel] Failed to report CI failure for ${ticket.key}: ${e.message}`);
+                            }
+                            ticket.failureCommentPosted = true;
+                            removeFromMonitoring();
+                            schedulePersistState();
+                            return;
+                        }
 
-                                if (!isWorkInProgress) {
-                                    // If it's a draft, we must undraft it before merging (using pulls.merge)
-                                    if (subPr.draft) {
-                                        writeLog(`[Sentinel] SubPR #${subPr.number} is Draft. Mark as Ready for Review...`);
-                                        await markPullRequestReadyForReview({ repoName: ticket.repoName, pullNumber: subPr.number });
-                                        ticket.toolUsed = "Autopilot + Undraft"; // [NEW] Track tool usage
-                                    } else {
-                                        ticket.toolUsed = "Autopilot"; // [NEW] Track tool usage
+                        // --- Copilot sub-PR handling ---
+                        if (!ticket.copilotMerged && ticket.prUrl && mainPrNumber) {
+                            try {
+                                const subPr = await findCopilotSubPR({ repoName: ticket.repoName, mainPrNumber });
+                                if (subPr) {
+                                    ticket.copilotPrUrl = subPr.html_url;
+                                    // [NEW] Capture Creation Time for Timer
+                                    if (!ticket.copilotCreatedAt) {
+                                        ticket.copilotCreatedAt = subPr.created_at;
                                     }
 
-                                    // [FIX #14] Only auto-approve / enable auto-merge once per sub PR.
-                                    if (!ticket.copilotApproved) {
-                                        writeLog(`[Sentinel] Auto-approving SubPR #${subPr.number}...`);
-                                        await approvePullRequest({ repoName: ticket.repoName, pullNumber: subPr.number });
-                                        ticket.copilotApproved = true;
+                                    const hasWipLabel = Array.isArray(subPr.labels) && subPr.labels.some(l => /\bWIP\b/i.test(l.name || ''));
+                                    const isWipTitle = /\bWIP\b/i.test(subPr.title || '');
+                                    // Block on WIP signaled by title OR label
+                                    const isWorkInProgress = isWipTitle || hasWipLabel;
 
-                                        // Enable GitHub Auto-Merge on the sub PR
-                                        const autoRes = await enablePullRequestAutoMerge({ repoName: ticket.repoName, pullNumber: subPr.number, mergeMethod: 'SQUASH' });
-                                        if (autoRes.ok) {
-                                            ticket.autoMergeEnabled = true;
-                                            logProgress(`Auto-merge enabled for Copilot SubPR #${subPr.number} on ${ticket.key}.`);
-                                            await addComment(ticket.key, `🤖 **Copilot Update**: Auto-merge has been enabled for the sub-PR #${subPr.number}.\n\nIt will merge once all required checks pass.`);
-                                            // Opportunistic check: mark merged flag if already merged
+                                    if (!isWorkInProgress) {
+                                        // If it's a draft, undraft it before auto-merge can act on it
+                                        if (subPr.draft) {
+                                            writeLog(`[Sentinel] SubPR #${subPr.number} is Draft. Mark as Ready for Review...`);
+                                            await markPullRequestReadyForReview({ repoName: ticket.repoName, pullNumber: subPr.number });
+                                            ticket.toolUsed = "Autopilot + Undraft"; // [NEW] Track tool usage
+                                        } else {
+                                            ticket.toolUsed = "Autopilot"; // [NEW] Track tool usage
+                                        }
+
+                                        // [FIX #14] Only auto-approve / enable auto-merge once per sub PR.
+                                        if (!ticket.copilotApproved) {
+                                            // Gate approval on the sub-PR's own checks:
+                                            // fetch its head sha, then its check runs.
+                                            let subPrDetails = null;
+                                            try {
+                                                subPrDetails = await getPullRequestDetails({ repoName: ticket.repoName, pull_number: subPr.number });
+                                            } catch (e) {
+                                                writeLog(`[Sentinel] Failed to fetch SubPR #${subPr.number} details: ${e.message}`);
+                                            }
+                                            const subPrSha = subPrDetails?.head?.sha || subPr.head?.sha;
+                                            const subChecks = subPrSha
+                                                ? await getPullRequestChecks({ repoName: ticket.repoName, ref: subPrSha })
+                                                : [];
+
+                                            const failedConclusions = ['failure', 'cancelled', 'timed_out', 'action_required'];
+                                            const failedChecks = subChecks.filter(c => failedConclusions.includes(c.conclusion));
+                                            if (failedChecks.length > 0) {
+                                                writeLog(`[Sentinel] SubPR #${subPr.number} has failing checks (${failedChecks.map(c => c.name).join(', ')}). Skipping approval.`);
+                                                if (!ticket.subPrChecksFailed) {
+                                                    ticket.subPrChecksFailed = true;
+                                                    try {
+                                                        await addComment(ticket.key, `⚠️ **Copilot sub-PR #${subPr.number} has failing checks**: ${failedChecks.map(c => c.name).join(', ')}.\n\nSentinel will not approve or auto-merge it until the checks pass.`);
+                                                    } catch (e) {
+                                                        writeLog(`[Sentinel] Failed to comment failing sub-PR checks for ${ticket.key}: ${e.message}`);
+                                                    }
+                                                }
+                                                return;
+                                            }
+
+                                            // Checks still running — skip this cycle silently.
+                                            if (subChecks.some(c => c.status !== 'completed')) {
+                                                return;
+                                            }
+
+                                            // All checks completed successfully (or
+                                            // zero checks exist): safe to approve.
+                                            writeLog(`[Sentinel] Auto-approving SubPR #${subPr.number}...`);
+                                            await approvePullRequest({ repoName: ticket.repoName, pullNumber: subPr.number });
+                                            ticket.copilotApproved = true;
+
+                                            // Enable GitHub Auto-Merge on the sub PR.
+                                            // There is deliberately NO immediate-merge
+                                            // fallback: if auto-merge cannot be enabled,
+                                            // log it and let a human decide.
+                                            const autoRes = await enablePullRequestAutoMerge({ repoName: ticket.repoName, pullNumber: subPr.number, mergeMethod: 'SQUASH' });
+                                            if (autoRes.ok) {
+                                                ticket.autoMergeEnabled = true;
+                                                logProgress(`Auto-merge enabled for Copilot SubPR #${subPr.number} on ${ticket.key}.`);
+                                                await addComment(ticket.key, `🤖 **Copilot Update**: Auto-merge has been enabled for the sub-PR #${subPr.number}.\n\nIt will merge once all required checks pass.`);
+                                                // Opportunistic check: mark merged flag if already merged
+                                                const mergedCheck = await isPullRequestMerged({ repoName: ticket.repoName, pullNumber: subPr.number });
+                                                if (mergedCheck.merged) {
+                                                    ticket.copilotMerged = true;
+                                                    ticket.copilotMergedAt = new Date().toISOString();
+                                                }
+                                            } else {
+                                                writeLog(`[Sentinel] ⚠️ Auto-merge enable failed for SubPR #${subPr.number}: ${autoRes.message}`);
+                                                ticket.autoMergeError = autoRes.message;
+                                            }
+                                        } else if (ticket.autoMergeEnabled && !ticket.copilotMerged) {
+                                            // Poll merged-state cheaply without re-approving / re-enabling auto-merge
                                             const mergedCheck = await isPullRequestMerged({ repoName: ticket.repoName, pullNumber: subPr.number });
                                             if (mergedCheck.merged) {
                                                 ticket.copilotMerged = true;
                                                 ticket.copilotMergedAt = new Date().toISOString();
                                             }
-                                        } else {
-                                            writeLog(`[Sentinel] ⚠️ Auto-merge enable failed for SubPR #${subPr.number}: ${autoRes.message}`);
-
-                                            // Fallback: If Auto-Merge fails (e.g. "clean status" which implies ready, or not protected), try immediate merge
-                                            writeLog(`[Sentinel] Attempting immediate merge for SubPR #${subPr.number} as fallback...`);
-                                            const mergeRes = await mergePullRequest({ repoName: ticket.repoName, pullNumber: subPr.number, method: 'squash' });
-                                            if (mergeRes.merged) {
-                                                ticket.copilotMerged = true;
-                                                ticket.copilotMergedAt = new Date().toISOString();
-                                                await addComment(ticket.key, `🤖 **Copilot Update**: Merged sub-PR #${subPr.number} (Fallback Immediate Merge).`);
-                                            }
-                                        }
-                                    } else if (ticket.autoMergeEnabled && !ticket.copilotMerged) {
-                                        // Poll merged-state cheaply without re-approving / re-enabling auto-merge
-                                        const mergedCheck = await isPullRequestMerged({ repoName: ticket.repoName, pullNumber: subPr.number });
-                                        if (mergedCheck.merged) {
-                                            ticket.copilotMerged = true;
-                                            ticket.copilotMergedAt = new Date().toISOString();
                                         }
                                     }
                                 }
+                            } catch (e) {
+                                writeLog(`Status check error for ${ticket.key}: ${e.message}`);
                             }
-                        } catch (e) {
-                            writeLog(`Status check error for ${ticket.key}: ${e.message}`);
                         }
+                    };
+
+                    if (agent) {
+                        await refreshAgentToken(agent);
+                        // Re-fetch: refreshAgentToken may have replaced the agent.
+                        const currentAgent = getAgent(agent.userId) || agent;
+                        await runWithUserToken(currentAgent.token, work);
+                    } else {
+                        await work();
                     }
-
-                    // Check if Main PR is ready for review (optional automation)
-                    // (Omitted for brevity, existing logic remains)
-
-                    // Error Reporting
-                    // ... (existing logic)
                 }
             }
         } catch (e) {
@@ -1671,6 +1993,10 @@ app.listen(PORT, async () => {
     writeLog(`GitHub Token present: ${!!ghToken}`);
     writeLog(`GitHub Issues Repo: ${issuesRepo}`);
     writeLog(`GH Copilot enabled: ${copilotEnabled}`);
+
+    if (!issuesRepo) {
+        writeLog('⚠️⚠️ WARNING: GITHUB_ISSUES_REPO is not set — issue scanning is DISABLED until it is set (e.g. GITHUB_ISSUES_REPO=owner/repo). Sentinel cannot read or create issues without it. ⚠️⚠️');
+    }
 
     startPolling();
 });

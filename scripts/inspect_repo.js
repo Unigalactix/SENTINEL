@@ -43,9 +43,6 @@ try {
     if (require.main === module) process.exit(1);
 }
 
-// Helper to flatten config arrays for easy checking
-const ALL_BASIC_FILES = config.basicFiles || [];
-
 // --- Interactive Input Setup ---
 const readline = require('readline');
 
@@ -63,9 +60,20 @@ function askQuestion(query) {
 
 // --- Logic ---
 
-async function processRepo(repoName, autoFix = false, logger = console.log) {
-    const log = (msg) => { if (logger) logger(msg); };
-    const error = (msg) => { if (logger) logger(msg); };
+/**
+ * Inspect a repository and (unless disabled) file/update a remediation issue.
+ * @param {string} repoName - "owner/repo"
+ * @param {Function} [logCallback] - Logger function. Back-compat: the old
+ *   second argument was an `autoFix` boolean — any non-function value is
+ *   treated as a no-op logger.
+ * @param {object} [options]
+ * @param {boolean} [options.createIssue] - When === false, skip the
+ *   create/update-issue step entirely and just return the findings.
+ */
+async function processRepo(repoName, logCallback, options = {}) {
+    const logger = typeof logCallback === 'function' ? logCallback : () => {};
+    const log = (msg) => logger(msg);
+    const error = (msg) => logger(msg);
 
     if (!repoName.match(/^[a-zA-Z0-9-]+\/[a-zA-Z0-9-._]+$/)) {
         error(`❌ Invalid repo format: ${repoName}`);
@@ -199,6 +207,9 @@ async function processRepo(repoName, autoFix = false, logger = console.log) {
     // --- Report Findings ---
     if (findings.length === 0) {
         log('   🎉 No issues found!');
+    } else if (options && options.createIssue === false) {
+        log(`   Found ${findings.length} issue(s). Issue creation disabled — returning findings only.`);
+        return { findings };
     } else {
         log(`   Found ${findings.length} issue(s). Aggregating into a single ticket...`);
 
@@ -253,13 +264,12 @@ async function processRepo(repoName, autoFix = false, logger = console.log) {
         try {
             const ISSUES_REPO = process.env.GITHUB_ISSUES_REPO;
 
-            // Search for an existing open GitHub issue with the same summary
+            // Search for an existing open GitHub issue with the same summary.
+            // searchIssues returns issues of any state, so filter to genuinely
+            // open ones via the mapped `state` field — otherwise a closed
+            // inspection issue would be "updated" forever and block a fresh one.
             const existingIssues = await searchIssues(ticketSummary);
-            // Fix regex to use word-boundary to avoid false positives like "Postponed"
-            const existingOpen = existingIssues.filter(i => {
-                const status = i.fields?.status?.name || '';
-                return !/^(done|closed|resolved)$/i.test(status);
-            });
+            const existingOpen = existingIssues.filter(i => i.fields?.state === 'open');
 
             let issueKey, issueUrl;
 
@@ -329,7 +339,7 @@ async function main() {
 
         console.log(`\n📋 Found ${targetRepos.length} repositories to scan.\n`);
         for (const repo of targetRepos) {
-            await processRepo(repo);
+            await processRepo(repo, console.log);
             console.log('---');
         }
         console.log('\n🏁 Batch Scan Complete.');
@@ -337,7 +347,7 @@ async function main() {
 
     } else if (cleanArgs.length > 0) {
         const repoName = cleanArgs[0];
-        await processRepo(repoName);
+        await processRepo(repoName, console.log);
         console.log('\n🏁 Single Scan Complete.');
         process.exit(0);
 
@@ -369,7 +379,7 @@ async function main() {
             repoName = answer.trim();
         }
 
-        await processRepo(repoName);
+        await processRepo(repoName, console.log);
         console.log('\n🏁 interactive Scan Complete.');
     }
 }

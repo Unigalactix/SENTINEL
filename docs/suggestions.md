@@ -10,8 +10,8 @@
 **Suggestion:** Add `octokit-plugin-throttling` to automatically handle secondary rate limits and back off.
 
 ## 4. Input Validation
-**Issue:** Formatting of JIRA tickets is parsed manually.
-**Suggestion:** Use a more robust JIRA ADF parser or validation schema (Zod) for incoming webhook payloads.
+**Issue:** GitHub Issue bodies and their directives (`repo:`, `language:`, `build:`, `test:`, `deploy:`) are parsed manually.
+**Suggestion:** Validate parsed issue directives against a schema (Zod) and report malformed directives back to the issue as a comment instead of silently ignoring them.
 
 ## 5. Persist System Status & History
 **Issue:** `systemStatus`, `scanHistory`, and `monitoredTickets` are held entirely in memory.
@@ -29,18 +29,18 @@
 - Store minimal, non-sensitive agent metadata (GitHub login, last activity timestamps) in the database for better auditability.
 
 ## 7. Job Queue for Ticket Processing
-**Issue:** Ticket processing is done inline in the polling loop.
-**Risk:** A single slow Jira or GitHub call can block the loop and delay other tickets; it also couples API, polling, and processing into one process.
+**Issue:** Issue processing is done inline in the manual scan.
+**Risk:** A single slow GitHub call can block the scan and delay other issues; it also couples API, scanning, and processing into one process.
 **Suggestion:**
-- Introduce a job queue (BullMQ / RabbitMQ / SQS) where the poller enqueues tickets and one or more workers process them.
+- Introduce a job queue (BullMQ / RabbitMQ / SQS) where a scan enqueues issues and one or more workers process them.
 - This makes it easier to scale processing horizontally, add retries, and track per-job state.
 
-## 8. Webhooks + Polling Hybrid
-**Issue:** The system relies heavily on polling Jira and GitHub for updates.
-**Risk:** Unnecessary API usage and slower reaction time to events.
+## 8. Webhooks for Issue Discovery
+**Issue:** New issues are only discovered on a manual scan (Scan Now / `POST /api/poll`), and PR updates are picked up by the 15-second PR monitor. That is the current model by design — scans are manual-only.
+**Risk:** Slower reaction time to newly labelled issues than an event-driven model.
 **Suggestion:**
-- Add optional Jira and GitHub webhooks to push events (issue transitions, PR updates, workflow runs) into Sentinel.
-- Keep polling as a fallback, but reduce intervals when webhooks are configured, lowering rate-limit pressure.
+- Add optional GitHub webhooks to push events (issue labelled, PR updates, workflow runs) into Sentinel so a scan can be triggered automatically when an issue gets the `sentinel:todo` label.
+- Keep the manual scan and the 15-second PR monitor as fallbacks.
 
 ## 9. Structured Logging & Observability
 **Issue:** Logs are mostly plaintext with limited structure.
@@ -50,7 +50,7 @@
 - Consider integrating with a log aggregator (ELK, Loki, or CloudWatch) and emitting metrics (Prometheus) for processed tickets, failures, retry counts, etc.
 
 ## 10. Retry & Backoff Strategy
-**Issue:** Many Jira/GitHub calls are one-shot; failures are logged but not retried safely.
+**Issue:** Many GitHub calls are one-shot; failures are logged but not retried safely.
 **Suggestion:**
 - Wrap external API calls with a retry policy that handles transient errors (network issues, 5xx, secondary rate limits) with exponential backoff and jitter.
 - Classify errors into transient vs permanent, and only retry transient ones.
@@ -61,35 +61,35 @@
 **Suggestion:**
 - Consider upgrading to WebSockets or Server-Sent Events for near real-time pushes from the server to the browser.
 - Add filters on the Kanban and history views (by project, priority, status, date range, agent) so users can focus on relevant tickets.
-- Provide a detail panel for a selected ticket with full timeline: Jira transitions, workflow runs, Copilot actions, and comments.
+- Provide a detail panel for a selected issue with full timeline: label/status transitions, workflow runs, Copilot actions, and comments.
 
 ## 12. UI: Error States & Guidance
 **Issue:** Some error states are only visible in logs or as brief banners.
 **Suggestion:**
-- Add clear, persistent banners when OAuth is misconfigured, GitHub App is missing permissions, or Jira credentials fail.
+- Add clear, persistent banners when OAuth is misconfigured or the GitHub App is missing permissions.
 - Link those banners directly to setup docs or a "Configuration" section describing required env vars and scopes.
 - In the log terminal, visually distinguish warnings vs errors using color and icons.
 
 ## 13. Security & Secrets Management
 **Issue:** The app relies on environment variables and in-memory tokens without a dedicated secrets strategy.
 **Suggestion:**
-- Integrate with a secrets manager (Azure Key Vault, AWS Secrets Manager, HashiCorp Vault) for GitHub/Jira credentials.
+- Integrate with a secrets manager (Azure Key Vault, AWS Secrets Manager, HashiCorp Vault) for GitHub credentials.
 - Ensure logs never include full tokens or sensitive headers; mask or truncate IDs where possible.
 - Define and document the minimal OAuth scopes and GitHub App permissions required, and validate them at startup with clear error messages.
 
 ## 14. Test Coverage & CI
-**Issue:** Existing tests cover basic exports but not full end-to-end flows.
+**Status:** A CI pipeline now exists — `.github/workflows/ci.yml` runs ESLint and the Jest suite (85 tests) on push/PR, and the Azure deploy is gated on it. Coverage is still thinnest on end-to-end flows.
 **Suggestion:**
-- Add unit tests for each service module (GitHub, Jira, LLM) using mocked HTTP responses.
-- Add integration tests for key API endpoints (`/api/status`, `/api/tickets`, `/api/auth/*`) with mocked external services.
-- Configure a CI pipeline (GitHub Actions) that runs `npm test`, lints the code, and optionally spins up a minimal Jira/GitHub mock harness.
+- Add unit tests for each service module (GitHub Issues, GitHub, LLM) using mocked HTTP responses.
+- Add integration tests for key API endpoints (`/api/status`, `/api/tickets`, `/api/auth/*`) with mocked external services, including the production auth guards.
+- Optionally spin up a minimal GitHub mock harness in CI for the full scan → PR → monitor loop.
 
-## 15. Multi-Tenant Hardening
-**Issue:** Multi-tenant support (multiple agents/users) is emerging but not fully isolated.
+## 15. Per-Operator Isolation Hardening
+**Issue:** Per-operator token isolation now exists (each operator's token is scoped to their own background work via async context), but dashboard operations state (queue, logs, history) is shared between operators — there is no per-tenant data isolation.
 **Suggestion:**
-- Clearly separate per-user state from global system state so one user cannot affect another user's tickets or repos.
-- Add organization-level configuration (allowed orgs, default projects, rate limits per tenant).
-- Consider persisting per-tenant preferences (e.g., default Jira project, default branch naming) in a configuration store instead of only env vars.
+- Decide explicitly which operations state should stay shared and which should become per-operator, and document the boundary.
+- Build on the repo allowlist (`ALLOWED_REPOS` / `ALLOWED_ORGS`) with organization-level configuration (default repos, rate limits per operator).
+- Consider persisting per-operator preferences (e.g., default repo, default branch naming) in a configuration store instead of only env vars.
 
 ## 16. MCP & Editor Integration
 **Issue:** The MCP server exposes powerful tools, but failure modes and configuration feedback in the editor can be improved.
@@ -114,9 +114,9 @@
 **Suggestion:** Implement a token refresh flow using the refresh token provided during the initial OAuth handshake.
 
 ## 18. UX for First-Time Setup
-**Issue:** New users need to understand how to connect Jira, GitHub, and the GitHub App correctly.
+**Issue:** New users need to understand how to connect GitHub OAuth, the GitHub App, and the issues repo correctly.
 **Suggestion:**
-- Expand the onboarding flow in the UI: a short checklist or wizard that walks through OAuth, GitHub App installation, and Jira project selection.
+- Expand the onboarding flow in the UI: a short checklist or wizard that walks through OAuth, GitHub App installation, issues-repo selection, and allowlist configuration.
 - Add more visual cues in the dashboard showing which integrations are active and which steps remain.
 
 These improvements should help make Sentinel more reliable, easier to operate in production, and friendlier for new users while preserving its current architecture.

@@ -3,9 +3,9 @@
 This guide explains how to connect the running **Sentinel MCP Server** to **GitHub Copilot Chat** in VS Code via the Model Context Protocol (MCP).
 
 Once connected, Copilot can:
-- **Read Jira Tickets**: "What is the acceptance criteria for NDE-123?"
-- **Check Status**: "Is the build failing for the current PR?"
-- **Trigger Actions**: "Force a poll now" or "Undraft this PR."
+- **Read GitHub Issues**: "What does issue GH-123 ask for?"
+- **Check Status**: "What is Sentinel doing right now?" or "Is the build failing for the current PR?"
+- **Trigger Actions**: "Scan for new issues now" or "Undraft this PR."
 
 ## Prerequisites
 1.  **Node.js** installed.
@@ -68,10 +68,21 @@ Use either the Settings UI or settings JSON. Both approaches are equivalent.
 
 Once connected, simply ask Copilot Chat:
 
-* **"Check the status of Jira ticket NDE-123."** → uses `get_jira_details`
+* **"What does GitHub Issue GH-123 ask for?"** → uses `get_github_issue`
+* **"What is Sentinel doing right now?"** → uses the `sentinel://status` resource
 * **"Why is the server reporting an error? Check the logs."** → uses `read_server_logs`
-* **"I just added a ticket. Trigger a poll."** → uses `trigger_manual_poll`
+* **"I just labelled an issue `sentinel:todo`. Trigger a scan."** → uses `trigger_manual_poll`
+* **"Is the build passing for this PR?"** → uses `check_pr_status`
+* **"Post that summary as a comment on GH-123."** → uses `add_github_issue_comment`
+* **"Generate the CI workflow YAML for this repo."** → uses `generate_workflow_yaml`
 * **"What projects are you monitoring?"** → uses `list_active_repos`
+* **"Mark PR #42 as ready for review."** → uses `undraft_pr`
+
+The full MCP surface is: the `sentinel://status` resource and the tools `generate_workflow_yaml`, `check_pr_status`, `add_github_issue_comment`, `delete_branch`, `undraft_pr`, `merge_pr`, `get_github_issue`, `read_server_logs`, `trigger_manual_poll`, and `list_active_repos`.
+
+> ⚠️ `merge_pr` and `delete_branch` are **destructive** and are disabled unless the MCP server is started with `SENTINEL_ALLOW_DESTRUCTIVE=true`.
+
+> Production note: against a deployed instance, the production API requires an authenticated session. Set `SENTINEL_INTERNAL_TOKEN` (on both the server and the MCP server) so `trigger_manual_poll` can send it as an internal token header.
 
 ## Troubleshooting
 

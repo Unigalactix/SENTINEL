@@ -243,8 +243,17 @@ class LLMService {
     async executeAgenticTask(userPrompt, context = {}) {
         if (!this.client) return "LLM not initialized.";
 
+        // Destructive tools (merge_pr, delete_branch) are opt-in only: they
+        // are neither offered to the model nor executed unless the operator
+        // explicitly sets SENTINEL_ALLOW_DESTRUCTIVE=true.
+        const DESTRUCTIVE_TOOLS = ['merge_pr', 'delete_branch'];
+        const allowDestructive = process.env.SENTINEL_ALLOW_DESTRUCTIVE === 'true';
+        const availableTools = allowDestructive
+            ? tools
+            : tools.filter(t => !DESTRUCTIVE_TOOLS.includes(t.name));
+
         // Convert shared tools to OpenAI format
-        const openAiTools = tools.map(t => ({
+        const openAiTools = availableTools.map(t => ({
             type: "function",
             function: {
                 name: t.name,
@@ -290,6 +299,21 @@ class LLMService {
                         const fnArgs = JSON.parse(toolCall.function.arguments);
 
                         console.log(`[LLM Agent] Calling ${fnName} with`, fnArgs);
+
+                        // Defense in depth: refuse destructive tools in the
+                        // execution loop too, even if the model asks for one
+                        // it was never offered.
+                        if (!allowDestructive && DESTRUCTIVE_TOOLS.includes(fnName)) {
+                            messages.push({
+                                role: "tool",
+                                tool_call_id: toolCall.id,
+                                content: JSON.stringify({
+                                    isError: true,
+                                    content: [{ type: 'text', text: `Error: Tool "${fnName}" is destructive and is disabled. Set SENTINEL_ALLOW_DESTRUCTIVE=true to enable it.` }]
+                                })
+                            });
+                            continue;
+                        }
 
                         // Find matching tool handler
                         const toolDef = tools.find(t => t.name === fnName);

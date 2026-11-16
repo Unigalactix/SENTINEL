@@ -16,7 +16,7 @@ flowchart TD
 
   subgraph SERVER[Automation Server]
     S0[Startup]
-    SA[Check activeAgents for Token]
+    SA[Authenticated operator token<br/>from async context]
     S1[Scan GitHub Issues (sentinel:todo) — Manual Trigger]
     S2[Process Issue Data]
     S3[Analyze Repo & Detect Language]
@@ -55,8 +55,8 @@ flowchart TD
   end
 
   %% Main happy path
-  J1 -->|Scan Now / POST /api/poll| SA -->|Agent token found| S1 --> S2 --> S3 --> S3A --> S4 --> S5 --> S6 --> S7 --> G1
-  SA -->|No agents| SA
+  J1 -->|Scan Now / POST /api/poll| SA -->|Operator token available| S1 --> S2 --> S3 --> S3A --> S4 --> S5 --> S6 --> S7 --> G1
+  SA -->|No authenticated operator| SA
   S2 -->|Label: in-progress| J2
   S7 -->|Comment PR| S8 --> G2
   G1 -->|Triggers| A1 --> A2 --> A3
@@ -75,9 +75,9 @@ flowchart TD
 
 Key Notes
 - **Manual Trigger**: Scans are initiated by the user via the **Scan Now** button or `POST /api/poll`. The system idles in "Ready" state until triggered.
-- **Multi-Tenant Auth**: Scan checks `activeAgents` Map via `getFirstAgent()` before scanning GitHub Issues. If no agent token is available, it waits for a user login.
+- **Per-Operator Token Isolation**: A scan runs with the triggering operator's OAuth token, scoped via async context — there is no single global token. Multiple operators can be signed in at once; dashboard operations state (queue, logs, history) is shared. In production, `POST /api/poll` requires an authenticated session (or GitHub App mode, or the `SENTINEL_INTERNAL_TOKEN` header for MCP-triggered scans). If no authenticated operator is available, the scan does not run.
 - **Concurrency Guard**: If a scan is already in progress, repeated calls to `POST /api/poll` return the current phase without spawning a second scan.
-- **Stale Agent Cleanup**: `cleanupStaleAgents()` runs every 15 minutes, removing agents inactive > 1 hour.
+- **PR Monitoring**: A separate background monitor runs every 15 seconds for PRs already being tracked (check-gated sub-PR merges, Done on main-PR merge, To Do on CI failure). It does not scan for new issues — issue scans are manual-only.
 - Build/Test defaults when missing: `npm run build` / `npm test`.
 - Static-site deploys package only `public/` or a minimal `deploy/` folder; validates `index.html`.
 - Deployment URL published via GitHub Deployments and included in issue comments.

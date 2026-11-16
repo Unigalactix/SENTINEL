@@ -1,38 +1,34 @@
 const https = require('https');
+const { getEffectiveToken, setFallbackToken } = require('./tokenContext');
 require('dotenv').config();
 
 const GITHUB_ISSUES_REPO = process.env.GITHUB_ISSUES_REPO;
 const GITHUB_ISSUES_LABEL = process.env.GITHUB_ISSUES_LABEL || 'sentinel:todo';
 
 /**
- * Module-level active OAuth token used as a default when no explicit token
- * is passed to a function. server.js calls setActiveIssueToken() whenever the
- * primary agent's token changes (login / token refresh / logout).
- */
-let activeIssueToken = null;
-
-/**
- * Set the active OAuth token used for GitHub Issue operations.
+ * @deprecated Compat shim — sets the shared startup fallback token in
+ * tokenContext. Startup / server-credential use only: request paths must
+ * carry the caller's token via runWithUserToken() (tokenContext.js) so
+ * concurrent users stay isolated, instead of sharing one module-global token.
  * @param {string|null} token
  */
 function setActiveIssueToken(token) {
-    activeIssueToken = token || null;
+    setFallbackToken(token || null);
 }
 
 /**
  * Resolve the GitHub token to use for API calls.
  * Priority:
  *   1. Explicit token argument (per-request OAuth token from agent / session)
- *   2. Module-level active OAuth token (set via setActiveIssueToken)
+ *   2. Async-context token (current request's user), then startup fallback
+ *      token — both via tokenContext.getEffectiveToken()
  *   3. GHUB_TOKEN env var (fallback PAT for background jobs / local dev)
  *
  * @param {string} [token] - Optional explicit token to use for this call.
  * @returns {string|null}
  */
 function resolveToken(token) {
-    if (typeof token === 'string' && token.length > 0) return token;
-    if (activeIssueToken) return activeIssueToken;
-    return process.env.GHUB_TOKEN || null;
+    return getEffectiveToken(token) || process.env.GHUB_TOKEN || null;
 }
 
 /**
@@ -139,6 +135,7 @@ function mapIssue(issue) {
         fields: {
             summary: issue.title,
             description: body,
+            state: issue.state,
             priority: { name: derivePriority(labels) },
             repo: parseBodyDirective(body, 'repo') || parseBodyDirective(body, 'repoName'),
             language: parseBodyDirective(body, 'language'),

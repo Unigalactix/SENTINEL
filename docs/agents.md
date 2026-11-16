@@ -101,8 +101,16 @@ Returns a live JSON snapshot of the system state:
 **Parameters**:
 -   `repoName`: String
 -   `ref`: Branch name or Commit SHA
--   `sentinel://status`: A resource URI to read the live JSON state of the system queue.
--   `add_github_issue_comment`: Helper tool to post manual comments to GitHub Issues.
+
+#### Other Tools
+-   `read_server_logs`: Read recent server log lines.
+-   `trigger_manual_poll`: Trigger a manual scan for `sentinel:todo` issues. Against a deployed instance it sends the `SENTINEL_INTERNAL_TOKEN` internal token header, since the production API requires an authenticated session.
+-   `get_github_issue`: Read the full details of a GitHub Issue.
+-   `add_github_issue_comment`: Post a comment to a GitHub Issue.
+-   `list_active_repos`: List the repositories/projects currently being monitored.
+-   `undraft_pr`: Mark a draft Pull Request as ready for review.
+-   `merge_pr`: ⚠️ **Destructive** — merge a Pull Request. Disabled unless `SENTINEL_ALLOW_DESTRUCTIVE=true`.
+-   `delete_branch`: ⚠️ **Destructive** — delete a branch. Disabled unless `SENTINEL_ALLOW_DESTRUCTIVE=true`.
 
 ---
 
@@ -145,38 +153,23 @@ flowchart TD
 
 ---
 
-## 4. Multi-Tenant Agent System (v2.1.0)
-**Module**: `server.js` — `activeAgents` Map  
-**Role**: Concurrent User Session Management
+## 4. Per-Operator Token Isolation
+**Module**: `server.js` + `src/services/authService.js`  
+**Role**: Concurrent Operator Session Management
 
-The system supports multiple logged-in users simultaneously. Each OAuth login creates an independent **agent context** stored in an in-memory Map keyed by `userId`.
+The system supports multiple signed-in operators simultaneously, but there is **no single global token**. Each operator signs in with GitHub OAuth (the `state` parameter is generated with `crypto` and verified on callback), and that operator's token is scoped to their own background work via **async context**: scans, monitoring, and API calls made on behalf of an operator run with that operator's token, and one operator's sign-in or sign-out does not hand their token to another operator's work.
 
-### Agent Lifecycle
-| Function | Purpose |
-|----------|---------|
-| `registerAgent(user, token, hasCopilot)` | Creates/updates agent on OAuth login |
-| `removeAgent(userId)` | Removes agent on logout |
-| `getAgent(userId)` | Looks up agent by user ID |
-| `getFirstAgent()` | Fallback for single-user mode (scan trigger) |
-| `cleanupStaleAgents()` | Removes agents inactive > 1 hour (runs every 15 min) |
+This is per-operator **token** isolation, not full multi-tenant data isolation: dashboard operations state (queue, logs, history) is shared between signed-in operators.
 
-### Agent Context Shape
-```javascript
-{
-  userId, token, user: { id, login, name, avatar_url, copilot_enabled },
-  tickets: [], logs: [], lastActivity: Date.now(), registeredAt: Date.now()
-}
-```
-
-### API Response (`/api/status`)
-- `myAgent` — Current session user's agent context (no token exposed)
-- `allAgents` — Sanitized list of all active agents
-- `activeAgentsCount` — Total active agent count
+### API Access (`/api/status` and friends)
+- In production, state-changing and sensitive API routes require an authenticated GitHub OAuth session (or GitHub App mode, or the `SENTINEL_INTERNAL_TOKEN` internal token header for MCP-triggered calls).
+- `GET /api/status` returns an explicit, safe status DTO (phase, counts, sanitized operator info). OAuth access and refresh tokens are **never** included in the response.
+- Runtime config editing and the MCP Inspector stay disabled in production, and production refuses to boot without a strong `SESSION_SECRET` (≥16 characters, not a built-in default).
 
 ### Dashboard
-- Header displays agent count badge when > 1 user is logged in
+- Header displays an operator/agent count badge when more than one operator is signed in
 - User avatar + login name shown for the current OAuth user
-- Scan uses `getFirstAgent()` token when `activeUserToken` is null
+- A scan runs with the triggering operator's token from their async context
 
 ---
 
@@ -189,7 +182,7 @@ The system supports multiple logged-in users simultaneously. Each OAuth login cr
 - **Phase Indicator**: Shows current phase (Scanning, Processing, Ready, Paused)
 - **Terminal Feed**: Live scrolling logs from issue processing
 - **Inspection Panel**: GitHub inspection issues fetched on independent 60-second timer
-- **Agent Badge**: Shows active agent count in header (multi-tenant)
+- **Agent Badge**: Shows active operator count in header when multiple operators are signed in
 - **Copilot Banner**: Indicates if GitHub Copilot is enabled for the session
 - **New Issue Button**: Opens modal to manually create a GitHub Issue in the configured repo
 

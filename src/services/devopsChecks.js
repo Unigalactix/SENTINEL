@@ -13,9 +13,6 @@ const {
  * @returns {Promise<Array<{summary: string, description: string}>>} List of findings
  */
 async function runDevOpsScan(repoName, rootFiles) {
-    const findings = [];
-    const lowerFiles = rootFiles.map(f => f.toLowerCase());
-
     // Parallel Execution of Checks
     const [containerResults, ciResults, governanceResults, qualityResults] = await Promise.all([
         checkContainerization(repoName, rootFiles),

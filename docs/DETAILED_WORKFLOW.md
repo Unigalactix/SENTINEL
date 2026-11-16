@@ -1,7 +1,7 @@
 # System Architecture & Workflow Specification
 
 **Project:** Sentinel DevOps Orchestrator  
-**Version:** 3.0.0  
+**Version:** 3.1.0  
 **Document Type:** Architecture Overview  
 
 ---
@@ -43,7 +43,7 @@ flowchart LR
     %% Connections
     User -->|Creates Issue| GHIssues
     User -->|Clicks Scan Now| Agent
-    GHIssues <-->|Poll / Update| Agent
+    GHIssues <-->|Manual Scan / Update| Agent
     Agent -->|Update Metrics| Dash
     Agent <-->|Analyze & Plan| LLM
     
@@ -184,7 +184,7 @@ graph TD
 
 ### Phase 1: Ingestion & Analysis
 1.  **Manual Trigger**: The user clicks **Scan Now** on the dashboard (or calls `POST /api/poll`), which queries the GitHub Issues API for issues labelled `sentinel:todo`.
-    *   **Authentication**: Uses the multi-tenant agent system (`activeAgents` Map). The scan picks the first available agent token via `getFirstAgent()`, falling back to the deprecated `activeUserToken` if set. Each logged-in user registers an independent agent context on OAuth callback.
+    *   **Authentication**: In production the scan requires an authenticated GitHub OAuth session (or GitHub App mode, or the `SENTINEL_INTERNAL_TOKEN` internal token header for MCP-triggered scans). Each signed-in operator's token is scoped to their own background work via async context — there is no single global token and no shared fallback token.
     *   **Concurrency Guard**: If a scan is already in progress (phase = Scanning or Processing), the endpoint returns the current phase without re-triggering.
 2.  **Analysis**:
     *   **Project Detection**: Reads the detected repository to identify the tech stack (e.g., `package.json` for Node, `pom.xml` for Java).
@@ -245,7 +245,7 @@ Sentinel can scan any GitHub repository on demand via the **Inspect Repo** butto
 | **Merge Conflict** | GitHub API returns `409 Conflict`. | **Human Escalation**: The system comments on the issue and stops automation for that item. |
 | **Network Flakiness** | GitHub requests time out. | **Retry Logic**: All critical API calls have exponential backoff retries (1s, 2s, 4s). |
 | **Orchestrator Crash** | Node.js process exits. | **Restart**: If backed by Docker/PM2, it auto-restarts. On boot, `reconcileActivePRsOnStartup()` rescans open PRs via `GH-NNN` key matching so monitoring resumes (idempotent design). |
-| **Multiple Users Login** | Two users login simultaneously. | **Multi-Tenant**: Each user gets their own `activeAgents` entry. Scan uses the first available token. Agent contexts are isolated. |
-| **Stale Sessions** | User closes browser without logging out. | **Auto-Cleanup**: `cleanupStaleAgents()` runs every 15 minutes and removes agents inactive > 1 hour. |
+| **Multiple Operators Login** | Two operators sign in simultaneously. | **Per-Operator Token Isolation**: Each operator's token is scoped to their own background work via async context; one operator's sign-in/sign-out does not hand their token to another's work. Dashboard operations state (queue, logs, history) is shared — this is not full multi-tenant data isolation. |
+| **Stale Sessions** | Operator closes browser without logging out. | **Session Expiry**: The signed-in session expires normally and its token context is discarded; no other operator's work is affected. |
 | **Double Scan Trigger** | User clicks Scan Now while a scan is running. | **Guard**: `/api/poll` returns `{ phase: "Scanning" }` without spawning a second scan. |
 

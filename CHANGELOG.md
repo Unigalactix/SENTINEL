@@ -6,6 +6,46 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [3.1.0] - 2026-11-16
+
+Security remediation release. Sentinel is now safe to run as a deployed, authenticated service: the API requires authentication in production, OAuth tokens are never exposed by the status endpoint, and each operator's token is isolated to their own work.
+
+### Added
+- **CI Workflow**: New `.github/workflows/ci.yml` runs ESLint and the full Jest test suite on every push and pull request to `main`. The Azure deploy workflow now runs the same lint + test job first and is gated on it passing.
+- **`LICENSE` File**: MIT license text is now included in the repository (previously claimed in the README but missing).
+- **Repo Allowlist**: Target repositories are restricted by the new `ALLOWED_REPOS` / `ALLOWED_ORGS` environment variables. When neither is set, the default is repos owned by the issues-repo owner or by the signed-in operator.
+- **Internal Token for MCP Scans**: The MCP `trigger_manual_poll` tool can send a `SENTINEL_INTERNAL_TOKEN` internal token header so it can call the production API, which otherwise requires an authenticated session.
+- **Deploy Guard**: The Azure deploy workflow now fails early if the `GITHUB_ISSUES_REPO` secret is empty, instead of deploying a scanner with no issues repo.
+
+### Changed
+- **Version Aligned to 3.1.0**: `package.json` and the MCP server now both report 3.1.0 (previously 1.0.0 in code vs 3.0.0 in docs).
+- **Per-Operator Token Context**: Replaced the single module-global active token with per-operator token isolation via async context. Each signed-in operator's token is scoped to their own background work. Multiple operators can be signed in at once; dashboard operations state (queue, logs, history) remains shared — this is token isolation, not full multi-tenant data isolation.
+- **`NODE_ENV=production` in Deployments**: The Dockerfile and the Azure deploy workflow now set `NODE_ENV=production`. Runtime config editing and the MCP Inspector stay disabled in production.
+- **Post-PR Status Config**: `config/board_post_pr_status.json` is keyed by repo full name (`owner/repo`), with `POST_PR_STATUS` as the global default.
+
+### Fixed
+- **Main-PR Lifecycle Completed**: When the main PR merges, the source issue is now transitioned to **Done** and monitoring stops. On CI failure, the issue is commented with the failure details and returned to **To Do**. Previously the loop never reached Done.
+- **Issue Directives Now Work**: `build:`, `test:`, and `deploy:` directives in the issue body are now actually honoured when generating workflows and PRs (previously parsed but ignored).
+- **Failing .NET Language-Detection Test**: Fixed the mocked Octokit client in `tests/githubService.test.js` so .NET detection is genuinely exercised; the full suite is now 85/85 passing.
+- **ESLint Errors**: Fixed all ESLint errors (including a constant-condition and an empty block in `server.js` and a useless escape in `githubService.js`); lint now passes cleanly.
+- **Undeclared Dependency**: `zod-to-json-schema`, required directly by `llmService.js`, is now declared in `package.json` instead of only arriving transitively via the MCP SDK.
+
+### Removed
+- **Dead Jira Utilities**: Deleted `src/utils/check_boards.js` and `scripts/debug_jira_types.js`, leftover Jira-era utilities for a service that no longer exists.
+- **Free-Text Repo Guessing**: Removed the fallback that guessed a target `owner/repo` from free text in the issue body. The target repo now comes only from the issue's `repo:` directive or `DEFAULT_REPO`.
+- **Immediate-Merge Fallback**: Removed the fallback that merged a Copilot sub-PR immediately when enabling auto-merge failed.
+- **Deploy to Azure Button**: Removed the README button linking to a non-existent `azuredeploy.json`. Deployment is via the GitHub Actions workflow to Azure Web Apps.
+
+### Security
+- **Status Endpoint No Longer Returns Tokens**: `GET /api/status` now returns an explicit, safe status DTO. OAuth access and refresh tokens are never serialized into the response.
+- **API Authentication Guards**: All state-changing and sensitive API routes now require an authenticated GitHub OAuth session in production (or GitHub App mode, or an internal token header for MCP-triggered calls). Previously routes such as pause, config, log download, and manual poll could be invoked unauthenticated.
+- **OAuth State Verification**: The OAuth `state` parameter is now generated with `crypto` and verified on callback, closing the login CSRF gap. Previously it was generated with `Math.random()` and never checked.
+- **Session Secret Fail-Fast**: Production refuses to boot without a strong `SESSION_SECRET` (at least 16 characters, and not the old built-in default `sentinel-dev-secret-change-in-prod`).
+- **Sub-PR Merge Gating**: Copilot sub-PR auto-merge is now gated on successful check runs. A sub-PR is approved and merged only after its checks pass.
+- **Destructive Tool Gating**: The MCP/LLM tools `merge_pr` and `delete_branch` are disabled unless `SENTINEL_ALLOW_DESTRUCTIVE=true`.
+
+---
+
 ## [3.0.0] - 2026-04-30
 
 ### Added

@@ -7,6 +7,16 @@ const path = require('path');
 // Helper for API calls to the main server
 const API_BASE = 'http://localhost:3000/api';
 
+// Destructive tools (merge_pr, delete_branch) are opt-in only: their handlers
+// refuse to run unless the operator explicitly sets
+// SENTINEL_ALLOW_DESTRUCTIVE=true.
+function destructiveRefusal(toolName) {
+    return {
+        isError: true,
+        content: [{ type: "text", text: `Error: Tool "${toolName}" is destructive and is disabled. Set SENTINEL_ALLOW_DESTRUCTIVE=true to enable it.` }]
+    };
+}
+
 const tools = [
     {
         name: "generate_workflow_yaml",
@@ -61,6 +71,9 @@ const tools = [
             branchName: z.string().describe("Name of the branch to delete")
         }),
         handler: async ({ repoName, branchName }) => {
+            if (process.env.SENTINEL_ALLOW_DESTRUCTIVE !== 'true') {
+                return destructiveRefusal('delete_branch');
+            }
             const result = await deleteBranch({ repoName, branchName });
             if (result.deleted) {
                 return {
@@ -104,6 +117,9 @@ const tools = [
             method: z.enum(['merge', 'squash', 'rebase']).optional().describe("Merge method (default: squash)")
         }),
         handler: async ({ repoName, pullNumber, method }) => {
+            if (process.env.SENTINEL_ALLOW_DESTRUCTIVE !== 'true') {
+                return destructiveRefusal('merge_pr');
+            }
             const result = await mergePullRequest({ repoName, pullNumber, method: method || 'squash' });
             if (result.merged) {
                 return {
@@ -159,7 +175,11 @@ const tools = [
         schema: z.object({}),
         handler: async () => {
             try {
-                const response = await fetch(`${API_BASE}/poll`, { method: 'POST' });
+                const headers = {};
+                if (process.env.SENTINEL_INTERNAL_TOKEN) {
+                    headers['x-sentinel-internal-token'] = process.env.SENTINEL_INTERNAL_TOKEN;
+                }
+                const response = await fetch(`${API_BASE}/poll`, { method: 'POST', headers });
                 const data = await response.json();
                 return {
                     content: [{ type: "text", text: `Poll Triggered: ${data.message}` }]

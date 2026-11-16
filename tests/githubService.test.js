@@ -1,35 +1,30 @@
 // tests/githubService.test.js
-const { generateWorkflowFile, detectRepoLanguage } = require('../src/services/githubService');
 
-// Mock @octokit/rest before requiring the service?
-// Since githubService instantiates Octokit immediately on require, we need to mock it carefully.
-// However, jest mocks modules.
+// Shared mock for repos.getContent, bound into every mock Octokit instance
+// below so tests can control what the service "fetches" from GitHub.
+//
+// The mock instances MUST include `hook: { error: jest.fn() }`:
+// githubService wraps every client with addErrorLogging(), which calls
+// client.hook.error('request', ...). Without a hook API, client creation
+// throws, detectRepoLanguage catches the error and silently falls back to
+// its 'node' default — which is why the .NET detection test used to fail.
+const mockGetContent = jest.fn();
+
 jest.mock('@octokit/rest', () => {
     return {
         Octokit: jest.fn().mockImplementation(() => ({
+            hook: { error: jest.fn() },
             repos: {
-                getContent: jest.fn()
-            }
+                getContent: mockGetContent
+            },
+            // Add other namespaces if needed for initialization
+            git: { getRef: jest.fn(), createRef: jest.fn() },
+            pulls: { create: jest.fn(), list: jest.fn() }
         }))
     };
 });
 
-// We need to re-require to get the mocked instance if we wanted access to it, 
-// but since we are testing exported functions that use the global `octokit` instance inside the module,
-// we might need to expose the octokit instance or mock the responses via the mock we just set up.
-
-// Let's get the specific mock function reference
-const { Octokit } = require('@octokit/rest');
-// The mock instance will be returned by the constructor
-const mockGetContent = jest.fn();
-Octokit.mockImplementation(() => ({
-    repos: {
-        getContent: mockGetContent
-    },
-    // Add other namespaces if needed for initialization
-    git: { getRef: jest.fn(), createRef: jest.fn() },
-    pulls: { create: jest.fn(), list: jest.fn() }
-}));
+const { generateWorkflowFile, detectRepoLanguage } = require('../src/services/githubService');
 
 describe('githubService', () => {
 

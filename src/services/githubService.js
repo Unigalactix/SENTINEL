@@ -1,4 +1,5 @@
 const { Octokit } = require('@octokit/rest');
+const { getEffectiveToken, setFallbackToken } = require('./tokenContext');
 require('dotenv').config();
 
 // Try to load GitHub App auth (optional - falls back to PAT if unavailable)
@@ -57,9 +58,12 @@ function addErrorLogging(client) {
 }
 
 function getOctokit(userToken) {
-    // Priority 1: Use user's OAuth token if provided
-    if (userToken) {
-        return addErrorLogging(new Octokit({ auth: userToken }));
+    // Priority 1: Use the effective user token — the explicit argument if
+    // given, otherwise the current request's async-context token, otherwise
+    // the startup fallback token (see tokenContext.js).
+    const effectiveToken = getEffectiveToken(userToken);
+    if (effectiveToken) {
+        return addErrorLogging(new Octokit({ auth: effectiveToken }));
     }
 
     // Priority 2: Use GitHub App if configured
@@ -89,16 +93,6 @@ function getOctokit(userToken) {
     return addErrorLogging(new Octokit());
 }
 
-// For backward compatibility, create a default client for server boot
-// This is only used for initial status checks, not per-user operations
-let defaultOctokit = null;
-function getDefaultOctokit() {
-    if (!defaultOctokit) {
-        defaultOctokit = getOctokit();
-    }
-    return defaultOctokit;
-}
-
 // Log which auth methods are available
 const hasAppAuth = !!(process.env.GITHUB_APP_ID && process.env.GITHUB_PRIVATE_KEY);
 const hasOAuth = !!(process.env.OAUTH_CLIENT_ID && process.env.OAUTH_CLIENT_SECRET);
@@ -107,33 +101,34 @@ if (hasOAuth) {
     console.log('[GitHub] Per-user OAuth authentication enabled');
 }
 
-// Module-level active token - set by server when user logs in
-let activeToken = null;
-
 /**
- * Set the active OAuth token for all GitHub operations.
- * Called by server.js when user logs in.
+ * @deprecated Compat shim — sets the startup fallback token in tokenContext.
+ * Startup / server-credential use only: request paths must carry the caller's
+ * token via runWithUserToken() (tokenContext.js) so concurrent users stay
+ * isolated, instead of sharing one module-global token.
  */
 function setActiveToken(token) {
-    activeToken = token;
+    setFallbackToken(token);
     if (token) {
-        console.log('[GitHub] Active user token set - all operations will use OAuth');
+        console.log('[GitHub] Fallback token set (startup/server credential)');
     } else {
-        console.log('[GitHub] Active user token cleared');
+        console.log('[GitHub] Fallback token cleared');
     }
 }
 
 /**
- * Get the current active token (for inspection/debugging)
+ * Get the currently effective token (explicit-less resolution):
+ * async-context token first, then the startup fallback token.
  */
 function getActiveToken() {
-    return activeToken;
+    return getEffectiveToken(null);
 }
 
-// Dynamic getter for octokit that uses active token
-// This allows all existing functions to automatically use the logged-in user's token
+// Dynamic getter for octokit that resolves the current effective token
+// (async request context first, then the startup fallback).
+// This allows all existing functions to automatically use the caller's token.
 function getClient() {
-    return getOctokit(activeToken);
+    return getOctokit();
 }
 
 // For functions that use the module-level octokit directly,
@@ -304,7 +299,7 @@ function generateWorkflowFile({ language, repoName, buildCommand, testCommand, d
         steps:
             - uses: actions/checkout@v4
             - name: Compute lowercase repo name
-                run: echo "REPO_LOWER=\$(echo '\${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+                run: echo "REPO_LOWER=$(echo '\${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
             - name: Log in to Azure Container Registry
                 if: env.ACR_LOGIN_SERVER != ''
                 uses: docker/login-action@v3

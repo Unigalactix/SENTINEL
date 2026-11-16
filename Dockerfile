@@ -1,6 +1,8 @@
 # Sentinel - Node.js Alpine Docker Image
 FROM node:20-alpine
 
+ENV NODE_ENV=production
+
 # Set working directory
 WORKDIR /app
 
@@ -10,6 +12,10 @@ RUN npm ci --omit=dev
 
 # Copy application files
 COPY . .
+
+# Prepare a writable logs dir and drop root privileges
+RUN mkdir -p logs && chown -R node:node /app
+USER node
 
 # Expose port
 EXPOSE 3000

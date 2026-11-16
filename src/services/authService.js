@@ -2,6 +2,7 @@
  * Authentication Service for GitHub App OAuth
  * Handles OAuth flow, token exchange, and session management
  */
+const crypto = require('crypto');
 require('dotenv').config();
 
 const OAUTH_CLIENT_ID = process.env.OAUTH_CLIENT_ID;
@@ -16,15 +17,19 @@ const DEFAULT_APP_SLUG = 'sentinel-devops-automation-agent';
 
 /**
  * Generates the GitHub OAuth authorization URL
+ * @param {string} redirectUri
+ * @param {string} [state] - CSRF state value to embed. Callers that verify
+ *   the callback must pass (and remember) their own state; when omitted, a
+ *   fresh one is generated here.
  */
-function getAuthorizationUrl(redirectUri) {
+function getAuthorizationUrl(redirectUri, state) {
     const params = new URLSearchParams({
         client_id: OAUTH_CLIENT_ID,
         redirect_uri: redirectUri,
         // Request offline access so GitHub can issue expiring tokens with refresh tokens
         // (GitHub may ignore this for some app types, but it's safe to include.)
         scope: 'repo read:org read:user offline_access',
-        state: generateState()
+        state: state || generateState()
     });
     return `https://github.com/login/oauth/authorize?${params.toString()}`;
 }
@@ -41,10 +46,11 @@ function getInstallationUrl() {
 
 
 /**
- * Generates a random state for CSRF protection
+ * Generates a cryptographically random state for CSRF protection
+ * (256 bits, hex-encoded).
  */
 function generateState() {
-    return Math.random().toString(36).substring(2, 15);
+    return crypto.randomBytes(32).toString('hex');
 }
 
 /**
@@ -169,6 +175,7 @@ function getAuthConfig() {
 
 module.exports = {
     getAuthorizationUrl,
+    generateState,
     getInstallationUrl,
     exchangeCodeForToken,
     getGitHubUser,

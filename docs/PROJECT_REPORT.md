@@ -1,167 +1,134 @@
-# Sentinel: The Digital DevOps Agent
+# Sentinel: Project Report
 
 ## Executive Summary
 
-**What Is This?**
-This project, "Sentinel," is an intelligent automation system that acts as a bridge between your project management tool (Jira) and your code repository (GitHub).
+**What is this?**
+Sentinel is an autonomous DevOps orchestrator that turns **GitHub Issues** into **GitHub Pull Requests**. There is no Jira integration and no `jiraService` — GitHub Issues is the ticket source, the tracking board, and the place Sentinel reports back to.
 
 **Why does this matter?**
-Software development involves many repetitive administrative steps: creating branches, copying descriptions, asking AI for code suggestions, and monitoring progress. This system automates all of that "busy work," allowing developers to focus on higher-level problem solving.
+Software development involves repetitive steps: creating branches, scaffolding CI/CD workflows, prompting an AI coder, watching checks, and updating the ticket. Sentinel automates that loop so developers can focus on review and higher-level problem solving.
 
-**The Analogy**
-Think of the Sentinel as a **Junior Developer who works 24/7**.
-1.  You assign them a task in Jira.
-2.  **They analyze the codebase and plan the fix (Agentic AI).**
-3.  They immediately start working on it.
-4.  They write the initial code using AI guidance.
-5.  They submit their work for review.
-6.  If everything looks good (tests pass), they file it away and mark the task as "Done."
+**The analogy**
+Think of Sentinel as a junior DevOps engineer on call:
 
----
-
-## The Workflow: The Life of a Ticket
-
-To understand how the system works, let's follow a single task from start to finish.
-
-### Phase 1: Planning (The Trigger)
-*   **Human Action**: You create a ticket in Jira (e.g., "Create a new Login Page") and move it to the "To Do" column.
-*   **System Response**: The Sentinel is constantly watching the "To Do" column. It spots the new ticket within 60 seconds.
-
-### Phase 2: Execution (The Creation)
-*   **System Action**: The Sentinel "reads" the ticket description to understand what needs to be built.
-*   **Agentic Analysis**: It scans the repository for **Secrets** and **Structure**, then uses Azure OpenAI to draft a "Fix Strategy."
-*   **AI Integration**: It sends this strategy to the **AI Coder** (GitHub Copilot CLI) and says, "Please write code to solve this problem."
-*   **Code Delivery**: The AI writes the code (e.g., HTML for the login form, CSS for styling).
-*   **Proposal**: The system packages this new code into a **Pull Request (PR)**. Think of a PR as a "Draft Proposal" that says, "Here is the code I wrote. Should we add it to the main project?"
-
-### Phase 3: Review & Refinement (The Gatekeeping)
-*   **Safety Checks**: The system waits for automated tests to run. These tests ensure the new code doesn't break anything existing.
-*   **Draft Status**: Sometimes, the work is marked as a "Draft" or "Work In Progress (WIP)." This is a safety signal meaning "Don't merge this yet, it's not ready."
-*   **Smart Management**:
-    *   If the work is good to go: The system automatically approves it.
-    *   If the work is stuck in "Draft": The system can intelligently "Undraft" it to keep things moving.
-
-### Phase 4: Completion (The Merge)
-*   **The Merge**: Once all checks pass, the Autopilot **Merges** the PR. This means the "Draft Proposal" creates a permanent part of the main codebase.
-*   **Notification**: The system goes back to your Jira ticket, posts a comment saying "I finished this!", and moves the ticket to the "Done" column.
+1. You file a GitHub Issue and label it `sentinel:todo`.
+2. You press **Scan Now** (scans are manual — there is no automatic polling loop for new issues).
+3. Sentinel analyses the target repo and plans the fix, optionally using Azure OpenAI.
+4. It opens a Pull Request with a generated CI/CD workflow and a context-aware `@copilot` prompt.
+5. A monitor watches the PR every 15 seconds. Copilot sub-PRs are approved and merged only after their check runs succeed.
+6. When the main PR merges, the issue is transitioned to **Done**. If CI fails, the issue is commented and returned to **To Do**.
 
 ---
 
-## The "Manual Override" (MCP Tools)
+## The Workflow: Life of an Issue
 
-Sometimes, automation isn't enough. You might want to take control yourself or have another AI agent assist. We provide a **Control Panel** (called the MCP Server) with specific buttons you can push using an AI interface (like Claude):
+### Phase 1: Trigger (Manual Scan)
+* **Human action**: Create a GitHub Issue in the configured issues repo (`GITHUB_ISSUES_REPO`), label it `sentinel:todo`, and optionally add directives in the body: `repo:`, `language:`, `build:`, `test:`, `deploy:`.
+* **System response**: Nothing happens until an operator clicks **Scan Now** in the dashboard or calls `POST /api/poll`. The scan fetches open issues with the configured label (default `sentinel:todo`).
+* **Target repo**: Taken only from the issue's `repo:` directive or `DEFAULT_REPO`, and checked against the repo allowlist (`ALLOWED_REPOS` / `ALLOWED_ORGS`; by default, repos owned by the issues-repo owner or the signed-in operator).
 
-1.  **`undraft_pr` (The "Ready" Button)**:
-    *   *Scenario*: The Sentinel created a Draft PR, but you know it's actually perfect.
-    *   *Action*: You use this tool to instantly mark it as "Ready for Review" so it can be merged.
+### Phase 2: Analysis & PR Creation
+* Sentinel detects the target repo's language and structure, lists available secret **names** (never values), and — if configured — uses Azure OpenAI (`llmService.js`) to summarise the repo and plan a fix strategy, posting that analysis as an issue comment.
+* It creates a feature branch and a Pull Request containing a generated (or reused) CI/CD workflow and an `@copilot` prompt. The `build:`, `test:`, and `deploy:` issue directives control the generated workflow's commands and target.
+* The issue is labelled `sentinel:in-progress`, and its post-PR status comes from `POST_PR_STATUS` or the per-repo override in `config/board_post_pr_status.json` (keyed by `owner/repo`).
 
-2.  **`merge_pr` (The "Force Merge" Button)**:
-    *   *Scenario*: Everything looks green, but the bot is hesitating.
-    *   *Action*: You force the merge to happen immediately.
+### Phase 3: Monitoring (15-Second PR Monitor)
+* A background monitor runs every 15 seconds for PRs Sentinel is already tracking. This is PR monitoring only — it does not scan for new issues.
+* When GitHub Copilot opens a sub-PR against the feature branch, Sentinel undrafts it, waits for its check runs, and — only after the checks succeed — approves it and enables auto-merge. There is no immediate-merge fallback.
 
-3.  **`add_jira_comment` (The "Note" Button)**:
-    *   *Scenario*: You want to leave a record on the ticket without logging into Jira.
-    *   *Action*: You post a comment directly from your AI interface.
-
-4.  **`delete_branch` (The "Cleanup" Button)**:
-    *   *Scenario*: An experiment failed and left a messy branch.
-    *   *Action*: You delete the branch to keep the repository clean.
-
----
-
-## The Dashboard (Your View)
-
-We have built a visual **Dashboard** that runs in your web browser.
-
-*   **What it looks like**: A board with columns for "Scanning", "Processing", and "Done".
-*   **What it tells you**:
-    *   **"Scanning..."**: "I'm looking for new work."
-    *   **"Processing [Ticket-123]"**: "I'm currently writing code for Ticket 123."
-    *   **"Time to Merge: 2m 30s"**: "It took me 2 minutes and 30 seconds to finish that last task."
-    *   **Badges**: Small icons showing if the Autopilot worked alone or if a human used a tool to help it.
-    *   **Agent Count**: A badge showing how many users are actively logged in (multi-tenant).
-    *   **Copilot Status**: Indicates if GitHub Copilot is enabled for the session.
+### Phase 4: Completion
+* **Main PR merged**: The source issue is transitioned to **Done**, a success comment is posted, and monitoring for that issue stops.
+* **CI failure**: The issue is commented with the failure details and returned to **To Do** so a human (or a later scan) can pick it up again.
 
 ---
 
-## Technical Appendix (For the Engineers)
+## Authentication & Security Model
 
-While the logic is simple, the technology is robust.
+* **GitHub OAuth**: Operators sign in with GitHub OAuth. The OAuth `state` parameter is generated with `crypto` and verified on callback.
+* **Per-operator token isolation**: Each signed-in operator's token is scoped to their own background work via async context — there is no single global token shared between operators. Multiple operators can be signed in at once. Dashboard operations state (queue, logs, history) is shared, so this is token isolation, not full multi-tenant data isolation.
+* **Authenticated API**: In production, all state-changing and sensitive API routes require an authenticated GitHub OAuth session (or GitHub App mode, or an internal token header for MCP-triggered calls). `GET /api/status` returns a safe status DTO and never returns OAuth tokens.
+* **Production hardening**: Production refuses to boot without a strong `SESSION_SECRET` (at least 16 characters, not a built-in default). `NODE_ENV=production` is set by the Dockerfile and the Azure workflow, and runtime config editing and the MCP Inspector stay disabled in production.
+* **Destructive tools gated**: The MCP/LLM tools `merge_pr` and `delete_branch` are disabled unless `SENTINEL_ALLOW_DESTRUCTIVE=true`.
 
-*   **Server (`server.js`)**: The "Brain" running in Node.js that coordinates everything.
-    *   **Multi-Tenant Agents**: Supports multiple concurrent users via `activeAgents` Map. Each OAuth login creates an isolated agent context.
-    *   **Agentic AI**: Uses Azure OpenAI to plan fixes and specific workflows.
-    *   **Intelligence**: Can optionally use `gh copilot` CLI to generate code fixes.
-    *   **Authentication**: Uses **GitHub OAuth** to perform actions on behalf of the logged-in user (Per-User Security).
-    *   **Cloud Ready**: Deployable to Azure Web App via Docker.
-*   **LLM Service (`llmService.js`)**: The "Cognitive Engine" connecting to Azure OpenAI.
-*   **GitHub Service (`githubService.js`)**: The "Librarian" that knows how to speak to GitHub's complex API.
-*   **Jira Service (`jiraService.js`)**: The "Messenger" that translates code updates into business updates on Jira.
-    *   **Dynamic Discovery**: Automatically fetches available projects via API, removing the need for manual configuration.
-*   **MCP Server (`mcpServer.js`)**: The "API Layer" that allows other AIs to securely control this system.
+---
+
+## The Dashboard
+
+The web dashboard (served from `public/index.html`) is the operator's view:
+
+* **Scan Now** button to trigger a manual issue scan, plus a pause/resume control.
+* **Phase indicator and live terminal feed** showing what Sentinel is doing.
+* **Queue and history** of processed issues and their PRs (shared operations state).
+* **Repo inspection panel**: an on-demand repo health scan that files its findings as a new GitHub Issue.
+* **Operator badge** showing who is signed in.
+
+---
+
+## MCP Server
+
+`mcpServer.js` exposes Sentinel to AI clients (Claude Desktop, VS Code Copilot) over the Model Context Protocol:
+
+* **Resource**: `sentinel://status`
+* **Tools**: `generate_workflow_yaml`, `check_pr_status`, `add_github_issue_comment`, `undraft_pr`, `get_github_issue`, `read_server_logs`, `trigger_manual_poll`, `list_active_repos`, plus the destructive, gated `merge_pr` and `delete_branch`.
+
+Against a deployed instance, `trigger_manual_poll` can send the `SENTINEL_INTERNAL_TOKEN` internal token header so it can call the production API.
+
+---
+
+## Technical Appendix
+
+* **Server (`server.js`)**: Node.js / Express orchestrator — manual scans, the authenticated API, the dashboard, and the 15-second PR monitor.
+* **GitHub Issue Service (`src/services/githubIssueService.js`)**: Reads, labels, comments on, and transitions GitHub Issues in `GITHUB_ISSUES_REPO`.
+* **GitHub Service (`src/services/githubService.js`)**: GitHub API operations — repo analysis, branches, PRs, check runs, merges — performed with the current operator's token from async context.
+* **Auth Service (`src/services/authService.js`)**: GitHub OAuth flow with verified `state`.
+* **LLM Service (`src/services/llmService.js`)**: Optional Azure OpenAI integration for repo summarisation, fix planning, and workflow drafting.
+* **DevOps Checks (`src/services/devopsChecks.js`)**: Repository health scanning used by the inspector.
+* **MCP Server (`mcpServer.js`)**: MCP interface for external AI agents (see above).
+* **Repo Inspector (`scripts/inspect_repo.js`)**: Standalone/on-demand repo audit that files findings as a GitHub Issue.
+
+### Deployment
+Sentinel ships as a Docker image (`node:20-alpine`, `NODE_ENV=production`) deployed to Azure Web Apps by `.github/workflows/deploy-azure.yml`. That workflow is gated on the CI workflow (`.github/workflows/ci.yml`: ESLint + Jest, 85 tests) and fails early if the `GITHUB_ISSUES_REPO` secret is empty.
 
 ### Glossary
-*   **Pull Request (PR)**: A request to merge new code changes into the main project.
-*   **Merge**: The act of combining new code into the main codebase.
-*   **Deploy**: Putting the specific code onto a server (Azure Web App) where users can see it.
-*   **OAuth**: Secure delegation protocol used to authenticate users against GitHub.
-*   **MCP (Model Context Protocol)**: A standard way for AI models to talk to external tools and data.
+* **Pull Request (PR)**: A proposal to merge code changes into a repository.
+* **Sub-PR**: A PR opened by GitHub Copilot against Sentinel's feature branch.
+* **OAuth**: Delegation protocol used to authenticate operators against GitHub.
+* **MCP (Model Context Protocol)**: A standard way for AI models to talk to external tools and data.
+* **Allowlist**: The `ALLOWED_REPOS` / `ALLOWED_ORGS` restriction on which repositories Sentinel may target.
 
-### System Architecture & Execution Flow
-
-This diagram illustrates how the different scripts in the `SENTINEL` folder interact.
+### System Architecture
 
 ```mermaid
 graph TD
-    %% Define Styles
     classDef core fill:#ffeb3b,stroke:#fbc02d,stroke-width:2px,color:#000;
     classDef service fill:#4fc3f7,stroke:#0277bd,stroke-width:2px,color:#000;
     classDef manual fill:#e0e0e0,stroke:#9e9e9e,stroke-width:2px,color:#000;
     classDef ai fill:#ba68c8,stroke:#7b1fa2,stroke-width:2px,color:#fff;
     classDef external fill:#fff,stroke:#333,stroke-width:2px,stroke-dasharray: 5 5;
 
-    %% Nodes
-    Server["🧠 server.js<br/>(The Engine)"]
-    JiraSvc["👀 jiraService.js<br/>(The Eyes)"]
-    GithubSvc["🖐️ githubService.js<br/>(The Hands)"]
-    MCPServer["🤖 mcpServer.js<br/>(The Sidecar)"]
-    Utils["🛠️ utils/check_boards.js<br/>(Manual Tool)"]
-    
-    %% External Nodes
-    Copilot["✨ GitHub Copilot CLI<br/>(Optional Intelligence)"]
-    JiraAPI[("Jira API")]
+    Server["server.js<br/>(Orchestrator)"]
+    IssueSvc["githubIssueService.js<br/>(GitHub Issues)"]
+    GithubSvc["githubService.js<br/>(GitHub API)"]
+    LLMSvc["llmService.js<br/>(Azure OpenAI, optional)"]
+    MCPServer["mcpServer.js<br/>(MCP Sidecar)"]
+
+    IssuesAPI[("GitHub Issues API")]
     GithubAPI[("GitHub API")]
-    AIClient[("Clause/IDE<br/>AI Client")]
+    AzureOpenAI[("Azure OpenAI")]
+    AIClient[("Claude / VS Code<br/>AI Client")]
 
-    %% Classes
     class Server core;
-    class JiraSvc,GithubSvc service;
-    class Utils,MCPServer manual;
-    class Copilot ai;
+    class IssueSvc,GithubSvc,LLMSvc service;
+    class MCPServer manual;
+    class AzureOpenAI ai;
 
-    %% Relationships - Main Loop
-    Server -->|"1. Polls (30s Loop)"| JiraSvc
-    JiraSvc <-->|"Fetch Tickets / Projects"| JiraAPI
-    JiraSvc -->|"Return Tickets"| Server
-    
-    %% Relationships - Execution
-    Server -.->|"2. Write Code (If Enabled)"| Copilot
-    Copilot -.->|"Return Code/YAML"| Server
-    
-    Server -->|"3. Create PR / Check Status"| GithubSvc
-    GithubSvc <-->|"Git Operations"| GithubAPI
-    
-    %% Relationships - Feedback
-    GithubSvc -->|"Status Update"| Server
-    Server -->|"4. Update Ticket"| JiraSvc
-
-    %% Standalone / Manual
-    Utils -.->|"Manually Run"| JiraAPI
-    AIClient <-->|"stdio communication"| MCPServer
-    MCPServer -.->|"Calls Functions"| GithubSvc
-    MCPServer -.->|"Calls Functions"| JiraSvc
-    
-    %% Comments
-    note1[Running continuously<br/>via 'node server.js']
-    note1 -.- Server
+    Server -->|"1. Manual scan (Scan Now / POST /api/poll)"| IssueSvc
+    IssueSvc <-->|"Fetch / label / comment / transition issues"| IssuesAPI
+    Server -->|"2. Analyse repo, create branch + PR"| GithubSvc
+    GithubSvc <-->|"Git & PR operations (per-operator token)"| GithubAPI
+    Server -.->|"3. Optional analysis & planning"| LLMSvc
+    LLMSvc <--> AzureOpenAI
+    Server -->|"4. 15s PR monitor: check-gated sub-PR merge, Done / To Do on outcome"| GithubSvc
+    AIClient <-->|"stdio (MCP)"| MCPServer
+    MCPServer -.->|"Calls Sentinel API / services"| Server
 ```
